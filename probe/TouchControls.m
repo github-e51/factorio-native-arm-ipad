@@ -289,6 +289,29 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     if (hit && hit!=self.pointerSurface) [self wake];
     return hit;
 }
+// Hardware keyboards normally reach SDL through GameController. As a second route, receive the
+// iPhone's own key presses here and pass them on as the same scancodes (USB HID usages match
+// SDL's). SDL ignores a key that is already held, so both routes together never double up.
+- (BOOL)canBecomeFirstResponder { return YES; }
+- (void)claimKeyboard {
+    BOOL typing;
+#if FPI_SDL_MAJOR == 3
+    typing=SDL_TextInputActive(SDL_GetKeyboardFocus());
+#else
+    typing=SDL_IsTextInputActive();
+#endif
+    if (self.window && !typing && !self.isFirstResponder) [self becomeFirstResponder];
+}
+- (void)forwardPresses:(NSSet<UIPress *> *)presses down:(BOOL)down {
+    for (UIPress *press in presses) {
+        if (!press.key) continue;
+        NSInteger code=press.key.keyCode;
+        if (code>0 && code<512) FPIKeyboard((int)code,down);
+    }
+}
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event { [self forwardPresses:presses down:YES]; }
+- (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event { [self forwardPresses:presses down:NO]; }
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event { [self forwardPresses:presses down:NO]; }
 - (UIView *)pill {
     UIView *pill=[UIView new];
     pill.backgroundColor=FPSurface(); pill.userInteractionEnabled=NO;
@@ -393,7 +416,11 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
                                           GCKeyboardDidConnectNotification,GCKeyboardDidDisconnectNotification,
                                           GCControllerDidConnectNotification,GCControllerDidDisconnectNotification])
             [center addObserver:self selector:@selector(hardwareChanged:) name:name object:nil];
-        dispatch_async(dispatch_get_main_queue(),^{ [self hardwareChanged:nil]; });
+        dispatch_async(dispatch_get_main_queue(),^{ [self hardwareChanged:nil]; [self claimKeyboard]; });
+        // Take the keyboard back whenever the game's own text entry closes or the app returns.
+        for (NSNotificationName name in @[UIKeyboardDidHideNotification,UIApplicationDidBecomeActiveNotification,
+                                          GCKeyboardDidConnectNotification])
+            [center addObserver:self selector:@selector(claimKeyboard) name:name object:nil];
 
     }
     return self;
