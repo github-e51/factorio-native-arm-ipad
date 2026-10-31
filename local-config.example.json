@@ -1,4 +1,7 @@
 {
   "factorio_app": "~/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app",
-  "cmake": "/opt/homebrew/bin/cmake"
+  "cmake": "/opt/homebrew/bin/cmake",
+  "device_id": "CoreDevice identifier from: xcrun devicectl list devices",
+  "team_id": "YOURTEAMID",
+  "bundle_id": "com.yourname.factorio.a1b2c3"
 }

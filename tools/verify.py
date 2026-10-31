@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Verify a locally built app without depending on somebody else's test logs."""
 import argparse
-import hashlib
 import json
 import re
 import struct
@@ -9,11 +8,18 @@ import subprocess
 from pathlib import Path
 from audit import ROOT, DEFAULT_APP, sdk_path, mobile_path, TBDLoader
 import yaml
-from build_probe import SUPPORTED_SHA256
-from macho import MachO
+from config import SUPPORTED_SOURCES, validate_source
+from macho import MachO, packed_version
 
 def require(condition,message):
     if not condition: raise RuntimeError(message)
+
+def verify_benchmark(log, expected_checksum=2892897386):
+    match=re.search(r'^\s*checksum: (\d+)',log,re.M)
+    require(match and match.group(1)==str(expected_checksum),
+            'Probe-map simulation checksum differs or is missing')
+    require('Performed 120 updates' in log and 'Goodbye' in log,'Incomplete benchmark')
+    return dict(ticks=120,checksum=match.group(1),scope='64x64 probe map with selected mods only')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -21,16 +27,26 @@ def main():
     parser.add_argument('--signed-app',type=Path,help='Also check this Xcode product and its bundle identifier')
     parser.add_argument('--bundle-id',help='Expected bundle identifier of --signed-app')
     parser.add_argument('--benchmark-log',type=Path,help='Optional log from your own 120-tick probe benchmark')
+    parser.add_argument('--benchmark-checksum',type=int,default=2892897386,
+                        help='Expected checksum measured on the original Mac with the same map and mods; default: upstream base game')
     args=parser.parse_args()
     original=DEFAULT_APP/'Contents/MacOS/factorio'
-    require(hashlib.sha256(original.read_bytes()).hexdigest()==SUPPORTED_SHA256,'Original installation changed')
+    source_sha256 = validate_source(DEFAULT_APP)
     source=MachO(original)
     report={}
     for sdk,folder,platform in [('iphoneos','build/iphoneos/FactorioProbe.app',2),('iphonesimulator','build/FactorioProbe.app',7)]:
         if sdk!=args.sdk: continue
         app=ROOT/folder
         patched=MachO(app/'FactorioProbe')
+        built_sdk = next(struct.unpack_from('<I', patched.data, p+16)[0]
+                         for c,p,n in patched.commands if c==0x32)
+        selected_sdk = packed_version(subprocess.check_output(
+            ['xcrun','--sdk',sdk,'--show-sdk-version'],text=True).strip())
+        require(built_sdk == selected_sdk,
+                'Game SDK version differs from selected Xcode SDK; rebuild to enable current device layouts')
         manifest=json.loads((ROOT/f'reports/entrypoint-patch-{sdk}.json').read_text())
+        require(manifest.get('source_sha256') == source_sha256,
+                'Build source differs from the current installation; rebuild before verifying')
         restored=bytearray(patched.data)
         seen=set()
         for entry in manifest['sdl_redirects']+manifest['platform_patches']:
@@ -65,12 +81,9 @@ def main():
                          platform_patches=manifest['platform_patches'],undocumented_section_changes=0,
                          signature='ad-hoc; device provisioning still required')
     if args.benchmark_log:
-        log=args.benchmark_log.read_text()
-        match=re.search(r'^\s*checksum: (\d+)',log,re.M)
-        require(match and match.group(1)=='2892897386','Probe-map simulation checksum differs or is missing')
-        require('Performed 120 updates' in log and 'Goodbye' in log,'Incomplete benchmark')
-        report['simulation']=dict(ticks=120,checksum=match.group(1),scope='64x64 probe map only')
-    report['source_sha256']=SUPPORTED_SHA256
+        report['simulation']=verify_benchmark(args.benchmark_log.read_text(),args.benchmark_checksum)
+    report['source_sha256']=source_sha256
+    report['source_status']=SUPPORTED_SOURCES[source_sha256]
     signed_app=args.signed_app
     if signed_app:
         import plistlib

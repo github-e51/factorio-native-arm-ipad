@@ -15,6 +15,9 @@ else
     task_app="$task_root/build/FactorioProbe.app"
 fi
 task_product="${TARGET_BUILD_DIR}/${FULL_PRODUCT_NAME}"
+if [[ -d "$task_product" ]]; then
+    /usr/bin/find "$task_product" -mindepth 1 -maxdepth 1 ! -name embedded.mobileprovision -exec /bin/rm -rf {} +
+fi
 /usr/bin/ditto "$task_app" "$task_product"
 if [[ "${CODE_SIGNING_ALLOWED:-NO}" == "YES" && -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]]; then
     for task_library in "$task_product"/Frameworks/*.dylib; do

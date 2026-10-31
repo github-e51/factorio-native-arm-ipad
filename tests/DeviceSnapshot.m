@@ -14,8 +14,8 @@
     XCUIApplication *app=[[XCUIApplication alloc] initWithBundleIdentifier:PROBE_BUNDLE_ID];
     [app activate];
     XCTAssertEqual(app.state,XCUIApplicationStateRunningForeground);
-    XCTAttachment *capture=[XCTAttachment attachmentWithScreenshot:XCUIScreen.mainScreen.screenshot];
-    capture.name=@"Factorio on physical iPad";
+    XCTAttachment *capture=[XCTAttachment attachmentWithScreenshot:app.screenshot];
+    capture.name=@"Factorio on physical device";
     capture.lifetime=XCTAttachmentLifetimeKeepAlways;
     [self addAttachment:capture];
     NSArray *actions=[NSJSONSerialization JSONObjectWithData:[PROBE_ACTIONS dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
@@ -36,7 +36,7 @@
         // SDL draws asynchronously and has no accessibility element changes
         // for XCTest's idle heuristic; allow the next rendered frames to land.
         [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
-        XCTAttachment *after=[XCTAttachment attachmentWithScreenshot:XCUIScreen.mainScreen.screenshot];
+        XCTAttachment *after=[XCTAttachment attachmentWithScreenshot:app.screenshot];
         after.name=action[@"button"] ?: (action[@"key"] ? [@"After key " stringByAppendingString:action[@"key"]] : [NSString stringWithFormat:@"After touch %@,%@",action[@"x"],action[@"y"]]);
         after.lifetime=XCTAttachmentLifetimeKeepAlways;
         [self addAttachment:after];

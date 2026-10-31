@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the local ARM64 iPadOS port from an owned macOS Factorio installation."""
+"""Build the local ARM64 iOS port from an owned macOS Factorio installation."""
 import argparse
 import json
 import plistlib
@@ -8,12 +8,38 @@ import shutil
 import hashlib
 from pathlib import Path
 from audit import ROOT, DEFAULT_APP, mobile_path, sdk_path, audit as generate_audit
-from config import DEFAULT_BUNDLE_ID, SUPPORTED_SHA256, validate_source
+from config import DEFAULT_BUNDLE_ID, SUPPORTED_SOURCES, SDL_MAJOR_BY_SHA256, validate_source
 from macho import MachO
 from entrypoint import inject_entry
 
 
-def build_shim(app, uikit=False, sdk='iphonesimulator'):
+def build_app_icon(source_app, app, sdk):
+    # Keep the proprietary artwork in ignored build output, sourced locally.
+    directory = ROOT/'build'/('app-icon-'+sdk)
+    catalog = directory/'Assets.xcassets'
+    iconset = catalog/'AppIcon.appiconset'
+    iconset.mkdir(parents=True, exist_ok=True)
+    converter = directory/'render-app-icon'
+    subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc',
+                    '-sdk', str(sdk_path('macosx')),
+                    '-module-cache-path', str(ROOT/'build/ModuleCache'),
+                    str(ROOT/'tools/render_app_icon.swift'), '-o', str(converter)], check=True)
+    subprocess.run([str(converter), str(source_app/'Contents/Resources/factorio.icns'),
+                    str(iconset/'Factorio.png')], check=True)
+    (iconset/'Contents.json').write_text(json.dumps({
+        'images': [{'filename': 'Factorio.png', 'idiom': 'universal',
+                    'platform': 'ios', 'size': '1024x1024'}],
+        'info': {'author': 'xcode', 'version': 1},
+    }, indent=2)+'\n')
+    partial_info = directory/'app-icon-info.plist'
+    subprocess.run(['xcrun', 'actool', str(catalog), '--compile', str(app),
+                    '--platform', sdk, '--minimum-deployment-target', '26.0',
+                    '--target-device', 'iphone', '--target-device', 'ipad', '--app-icon', 'AppIcon',
+                    '--output-partial-info-plist', str(partial_info)], check=True)
+    return plistlib.loads(partial_info.read_bytes())
+
+
+def build_shim(app, uikit=False, sdk='iphonesimulator', sdl_major=2):
     audit = json.loads((ROOT/'reports/audit-iphoneos.json').read_text())
     directory = ROOT/'build'/('generated-'+sdk)
     directory.mkdir(parents=True, exist_ok=True)
@@ -23,6 +49,7 @@ def build_shim(app, uikit=False, sdk='iphonesimulator'):
     missing.discard('_clGetPlatformIDs')
     missing.discard('_SteamAPI_RestartAppIfNecessary')
     missing.discard('_SteamAPI_Init')
+    missing.discard('_SteamInternal_SteamAPI_Init')
     classes = sorted({s.split('$_')[1] for s in missing if s.startswith('_OBJC_')})
     classes = [c for c in classes if c not in ('NSColorSpace','NSBitmapImageRep')]
     lines = ['#import <Foundation/Foundation.h>', '#include <stdio.h>', '#include <stdlib.h>', '#include <execinfo.h>',
@@ -59,15 +86,30 @@ def build_shim(app, uikit=False, sdk='iphonesimulator'):
                '-Wl,-reexport-lSystem','-Wl,-reexport-lobjc','-Wl,-reexport-lresolv']
     if uikit:
         main_offset = next(s['address'] for s in audit['entrypoints'] if s['name']=='_main') - 0x100000000
+        sdl_name = 'libSDL2.dylib' if sdl_major == 2 else 'libSDL3.dylib'
+        source = ROOT/'build/vendor'/('SDL-release-2.30.9' if sdl_major == 2 else 'SDL-release-3.4.14')
         command += [str(ROOT/'probe/UIKitEntry.m'),str(ROOT/'probe/MetalCompat.m'),
-                    str(ROOT/'probe/TouchControls.m'),'-I'+str(ROOT/'build/vendor/SDL-release-2.30.9/include'),
-                    f'-DORIGINAL_MAIN_OFFSET={main_offset}','-framework','UIKit']
-        sdl = frameworks/'libSDL2.dylib'
-        sdl_build='sdl-simulator' if sdk=='iphonesimulator' else 'sdl-iphoneos'
-        shutil.copyfile(ROOT/'build'/sdl_build/'libSDL2-2.0.0.dylib',sdl)
-        subprocess.run(['install_name_tool','-id','@executable_path/Frameworks/libSDL2.dylib',str(sdl)],check=True)
-        rename_objc_classes(sdl, {'SDL_RumbleMotor':'FPI_RumbleMotor','SDL_RumbleContext':'FPI_RumbleContext',
-                                'SDL_VideoData':'FPI_VideoData','SDL_WindowData':'FPI_WindowData'})
+                    str(ROOT/'probe/TouchControls.m'),'-I'+str(source/'include'),
+                    f'-DORIGINAL_MAIN_OFFSET={main_offset}',f'-DFPI_SDL_MAJOR={sdl_major}',
+                    '-framework','UIKit','-framework','GameController']
+        if sdl_major == 3:
+            command += ['-I'+str(source/'include/SDL3')]
+        sdl = frameworks/sdl_name
+        sdl_build=('sdl' if sdl_major == 2 else 'sdl3')+('-simulator' if sdk=='iphonesimulator' else '-iphoneos')
+        dylib = 'libSDL2-2.0.0.dylib' if sdl_major == 2 else 'libSDL3.0.dylib'
+        shutil.copyfile(ROOT/'build'/sdl_build/dylib,sdl)
+        subprocess.run(['install_name_tool','-id','@executable_path/Frameworks/'+sdl_name,str(sdl)],check=True)
+        classes = ({'SDL_RumbleMotor':'FPI_RumbleMotor','SDL_RumbleContext':'FPI_RumbleContext',
+                    'SDL_VideoData':'FPI_VideoData','SDL_WindowData':'FPI_WindowData'}
+                   if sdl_major == 2 else
+                   {'SDL3METAL_PaletteData':'FPI3METAL_PaletteData',
+                    'SDL3METAL_RenderData':'FPI3METAL_RenderData',
+                    'SDL3METAL_TextureData':'FPI3METAL_TextureData',
+                    'SDL3_RumbleContext':'FPI3_RumbleContext',
+                    'SDL3_RumbleMotor':'FPI3_RumbleMotor',
+                    'SDLCaptureVideoDataOutputSampleBufferDelegate':'FPICaptureVideoDataOutputSampleBufferDelegate',
+                    'SDLPrivateCameraData':'FPIPrivateCameraData'})
+        rename_objc_classes(sdl, classes)
         subprocess.run(['codesign','--force','--sign','-',str(sdl)],check=True,capture_output=True)
         command += ['-Wl,-reexport_library,'+str(sdl)]
     for lib in audit['libraries']:
@@ -121,36 +163,46 @@ def main():
     args = parser.parse_args()
     if args.simulator_metal and args.sdk!='iphonesimulator':
         parser.error('--simulator-metal is forbidden in device builds')
-    validate_source(args.app)
+    source_sha256 = validate_source(args.app)
+    sdl_major = SDL_MAJOR_BY_SHA256[source_sha256]
     if args.shim or args.uikit:
         generate_audit(args.app, 'iphoneos')
     (ROOT/'reports').mkdir(exist_ok=True)
     app = ROOT/('build/FactorioProbe.app' if args.sdk=='iphonesimulator' else 'build/iphoneos/FactorioProbe.app')
+    if app.exists():
+        shutil.rmtree(app)
     app.mkdir(parents=True, exist_ok=True)
     binary = args.app/'Contents/MacOS/factorio'
-    if hashlib.sha256(binary.read_bytes()).hexdigest()!=SUPPORTED_SHA256:
-        raise ValueError('Unrecognized Factorio binary: this patch set is pinned to the audited 2.0.77 build')
+    if hashlib.sha256(binary.read_bytes()).hexdigest()!=source_sha256:
+        raise ValueError('Factorio executable changed during the build')
     macho = MachO(binary)
     replacements = {lib: mobile_path(lib) for lib in macho.libraries}
     if args.shim or args.uikit:
-        replacements.update(build_shim(app,args.uikit,args.sdk))
-    macho.retarget(app/'FactorioProbe', 7 if args.sdk=='iphonesimulator' else 2, replacements)
+        replacements.update(build_shim(app,args.uikit,args.sdk,sdl_major))
+    sdk_version = subprocess.check_output(['xcrun','--sdk',args.sdk,'--show-sdk-version'],text=True).strip()
+    macho.retarget(app/'FactorioProbe', 7 if args.sdk=='iphonesimulator' else 2,
+                   replacements, sdk_version)
     if args.uikit:
-        entry = inject_entry(app/'FactorioProbe',app/'Frameworks/libSDL2.dylib',args.simulator_metal)
+        sdl_name = 'libSDL2.dylib' if sdl_major == 2 else 'libSDL3.dylib'
+        entry = inject_entry(app/'FactorioProbe',app/'Frameworks'/sdl_name,args.simulator_metal,sdl_major)
+        entry['source_sha256'] = source_sha256
+        entry['source_status'] = SUPPORTED_SOURCES[source_sha256]
         (ROOT/f'reports/entrypoint-patch-{args.sdk}.json').write_text(json.dumps(entry,indent=2)+'\n')
     info = dict(CFBundleExecutable='FactorioProbe', CFBundleIdentifier=args.bundle_id,
-                CFBundleName='Factorio Loader Probe', CFBundleDisplayName='Factorio Probe',
+                CFBundleName='Factorio', CFBundleDisplayName='Factorio',
                 CFBundlePackageType='APPL', CFBundleVersion='1', CFBundleShortVersionString='0.1',
                 CFBundleSupportedPlatforms=['iPhoneSimulator' if args.sdk=='iphonesimulator' else 'iPhoneOS'], MinimumOSVersion='26.0',
-                UIDeviceFamily=[2], LSRequiresIPhoneOS=True, UILaunchScreen={})
+                UIDeviceFamily=[1,2], LSRequiresIPhoneOS=True, UILaunchScreen={})
     if args.uikit:
-        info['UISupportedInterfaceOrientations'] = ['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight']
+        info['UISupportedInterfaceOrientations'] = ['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight',
+                                                     'UIInterfaceOrientationPortrait']
         info['UIApplicationSupportsIndirectInputEvents'] = True
         info['UIStatusBarHidden'] = True
         info['UIViewControllerBasedStatusBarAppearance'] = False
         info['UIRequiresFullScreen'] = True
+    info.update(build_app_icon(args.app, app, args.sdk))
     (app/'Info.plist').write_bytes(plistlib.dumps(info))
-    if args.bundle_data and not (app/'data/base/info.json').exists():
+    if args.bundle_data:
         try:
             subprocess.run(['cp','-cR',str(args.app/'Contents/data'),str(app/'data')],check=True)
         except subprocess.CalledProcessError:

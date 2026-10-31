@@ -15,7 +15,7 @@
   B00000000000000000000009 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B0000000000000000000000B); runOnlyForDeploymentPostprocessing = 0; };
   B0000000000000000000000B = {isa = PBXBuildFile; fileRef = B00000000000000000000006; };
   B00000000000000000000010 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 26.0; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES;}; };
-  B00000000000000000000012 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = local.factorio.probesnapshot; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; ARCHS = arm64; DEBUG_INFORMATION_FORMAT = dwarf;}; };
+  B00000000000000000000012 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = local.factorio.probesnapshot; PRODUCT_NAME = "$(TARGET_NAME)"; GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; ARCHS = arm64; DEBUG_INFORMATION_FORMAT = dwarf;}; };
  };
  rootObject = B00000000000000000000001;
 }
