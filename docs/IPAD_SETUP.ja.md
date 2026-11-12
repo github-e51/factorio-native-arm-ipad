@@ -1,71 +1,12 @@
 # iPadで動かすための準備
 
-この移植コードは、Steamの通常版Factorio 2.0.77、build 84539に対応しています。Space Age版や2.1.24は対象外です。実行ファイルのハッシュを確認してから変換するため、バージョン番号だけを合わせてもビルドできない場合があります。
+Factorio 2.1.24、build 87808のSteam版Space Ageを、iPad用アプリとしてビルドできるようにしました。2026年11月13日時点で、ビルド、開発用署名、シミュレーターでの処理の検証まで完了しています。iPadへのインストールと起動は行っていません。
 
-## 今回の準備で完了したこと
+## 準備済みのアプリを使う
 
-2026年11月12日に、Steamの通常版2.0.77を取得し、指定のSHA-256との完全一致を確認しました。Xcode 27.0、iOS SDK 27.0でビルドし、開発用の署名まで完了しています。
+署名済みアプリは `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app` にあります。Bundle Identifierは `org.lenhirata.factorioipad` です。Macとペアリング済みの13インチM5 iPad Proを署名対象に含めています。署名の有効期限は2026年11月19日23時42分です。時刻は日本時間です。
 
-署名済みアプリは `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app` にあります。Bundle Identifierは `org.lenhirata.factorioipad` です。プロファイルには、Macとペアリング済みの13インチM5 iPad Proが含まれています。有効期限は2026年11月19日23時42分です。時刻は日本時間です。
-
-このiPadのOSは27.3で、デベロッパモードは有効です。Mac側から状態を確認済みのため、同じ端末では有効化し直す必要はありません。
-
-`tools/verify.py` で26個の実行ファイルとライブラリ、817箇所のSDL呼び出しの転送、記録したパッチとの一致を確認しました。記録されていないセクションの変更はありません。iPadへのインストールと起動はまだ行っていません。
-
-Xcode 27のSDKに含まれる `arm64e-ios` と `arm64e.x1-ios` を確認処理が読み取れるよう修正しました。macOSやMac CatalystのAPIは対象から除外したままです。Pythonのテスト18件と、変更したPythonファイルのruff・tyによる検査が通っています。Objective-Cのビルドには、既存APIの非推奨警告が2件残っています。
-
-GitHubのoriginには書き込み権限がないため、PRの作成は保留です。
-
-## Steamから対応版を取得する
-
-MacのSteamで、ライブラリのFactorioを右クリックし、プロパティのベータから2.0.77を選びます。DLCのSpace Ageも外して、更新が完了するまで待ってください。ゲームを起動する必要はありません。
-
-旧バージョンの選択方法は[Factorio公式Wiki](https://wiki.factorio.com/Install_guide#Downloading_and_installing_old_versions)に説明されています。[公式サイトの2.0.77アーカイブ](https://factorio.com/download/archive/2.0.77)もありますが、配布元の違う実行ファイルは、この移植コードで使えるとは限りません。ここではSteamの通常版を使います。
-
-このリポジトリのフォルダーで、次のコマンドを実行します。
-
-```sh
-uv sync --locked
-uv run python tools/setup.py --preserve-source
-```
-
-セットアップは、実行ファイルとデータのバージョンを検査し、アプリを `build/source/factorio-2.0.77.app` に保存します。以後のビルドは、この保存したアプリを読みます。Steam側を更新しても保存したコピーは変わりません。パスはGitの管理対象外の `.local-config.json` に記録されます。
-
-すでに保存したコピーがある場合は再検査して使います。壊れたコピーを自動で上書きすることはありません。`FACTORIO_APP` を設定している場合は、そのパスがローカル設定より優先されます。
-
-保存する前に検査だけ行う場合は、次を使います。
-
-```sh
-uv run python tools/setup.py --check
-```
-
-## iPadに接続する前にビルドする
-
-MacにXcodeとiOS SDK 26以降、CMakeが必要です。Apple Silicon上で実行してください。
-
-```sh
-uv run python tools/prepare_sdl.py --sdk iphoneos
-uv run python tools/build_probe.py --sdk iphoneos --uikit --bundle-data
-uv run python tools/verify.py --sdk iphoneos
-```
-
-出力は `build/iphoneos/FactorioProbe.app` です。この段階では開発用の署名とプロファイルが未設定のため、そのままiPadへインストールできません。検証は変換した実行ファイルの変更箇所、ライブラリの対象OS、署名を調べます。iPad上での描画や操作を確認するには実機が必要です。
-
-Xcodeのビルド手順まで確認する場合は、署名を無効にして実行します。
-
-```sh
-xcodebuild -project FactorioProbe.xcodeproj -scheme FactorioProbe \
-  -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
-  -derivedDataPath build/Xcode CODE_SIGNING_ALLOWED=NO build
-```
-
-## iPadで操作を始めるとき
-
-iPadOS 26以降のiPadをUSBでMacに接続します。iPadでMacを信頼し、設定のプライバシーとセキュリティからデベロッパモードを有効にします。
-
-Macで `FactorioProbe.xcodeproj` を開き、FactorioProbeターゲットのSigning & Capabilitiesで自分のTeamを選びます。必要に応じてBundle Identifierを変更し、接続したiPadを実行先に選んでRunを実行します。詳細は [README](../README.md) の署名と起動の手順を参照してください。
-
-今回の署名済みアプリを使う場合は、iPadの準備後に次のコマンドでインストールと起動ができます。デバイス名は `xcrun devicectl list devices` で確認してください。
+このiPadはiPadOS 27.3で、デベロッパモードが有効です。iPadのロックを解除した状態で、リポジトリのフォルダーから次のコマンドを実行するとインストールできます。この準備では、まだ実行していません。
 
 ```sh
 xcrun devicectl device install app --device 'LenのiPad' \
@@ -73,18 +14,93 @@ xcrun devicectl device install app --device 'LenのiPad' \
 xcrun devicectl device process launch --device 'LenのiPad' org.lenhirata.factorioipad
 ```
 
-Xcodeから再ビルドする場合もBundle Identifierを `org.lenhirata.factorioipad` にそろえてください。署名の期限が切れた場合は、自分のTeamでビルドし直します。
+起動後にSteamを利用できないという案内が出た場合は、画面の案内に従って閉じます。Space Ageの有効状態は、ゲーム内のMOD設定で確認してください。通常版として遊ぶ場合は、同じ実行ファイルでSpace AgeなどのDLCを無効にできます。
 
-この準備では、iPadへのインストール、起動、既存セーブの変更は行いません。元の移植コードで描画が確認されているのはM1 iPad Proです。手元のiPadでの動作は、実機で確認するまで未検証です。
+署名の期限が切れた場合は、自分のTeamでビルドし直します。Xcodeで `FactorioProbe.xcodeproj` を開き、Signing & Capabilitiesで自分のTeamを選んでください。既存アプリを更新する場合は、Bundle Identifierを `org.lenhirata.factorioipad` にそろえます。
 
-## 開発時の確認
+## 確認できた範囲
+
+Mac版と移植版に同じセーブを読み込ませ、120回の更新後のチェックサムを比較しました。
+
+| 実行する構成 | Mac版とシミュレーターのチェックサム |
+|---|---|
+| 2.1.24でSpace AgeなどのDLCを有効化 | `3668795911` で一致 |
+| 2.1.24でDLCを無効化して通常版として実行 | `4181102737` で一致 |
+| 旧版2.0.77の通常版 | `2892897386` で一致 |
+
+2.1.24の通常版の検証には、Space Ageの実行ファイルでDLCを無効にした構成を使いました。
+
+Space Ageの検証用シナリオは、Mac版と移植版の両方で通りました。Nauvis、Vulcanus、Fulgora、Gleba、Aquiloの地形を生成し、DLC固有の設備の定義、レジェンダリー品質の設備の作成、宇宙プラットフォームとハブの作成を確認しています。その状態で120回の更新も行いました。
+
+iPad用アプリでは、29個の実行ファイルとライブラリ、1,269箇所のSDL呼び出しの転送、Space Age・Elevated Rails・Quality・Recyclerを含むデータ、開発用署名を検証しました。記録されていないセクションの変更はありません。
+
+2.1.24での実機の描画、音声、タッチ操作、大規模な工場、長時間の動作は未検証です。シミュレーターの処理の検証は、実機での描画や操作の確認を代わりに行うものではありません。
+
+## Steamから再取得する
+
+SteamでFactorioのプロパティを開き、ベータを「なし」にして、DLCのSpace Ageを有効にします。更新が完了してから、次を実行してください。
+
+```sh
+uv sync --locked
+uv run python tools/setup.py --steam --preserve-source
+```
+
+`--steam` は、保存済みの旧版が設定されていてもSteam側のアプリを読みます。セットアップは実行ファイルのSHA-256、アプリのバージョン、各DLCのデータを検査し、`build/source/factorio-2.1.24-space-age.app` に保存します。以後のビルドでは、このコピーを使います。Steamの更新では、このコピーは変更されません。
+
+設定はGitの管理対象外の `.local-config.json` に記録されます。`FACTORIO_APP` を設定している場合は、その値が設定ファイルより優先されます。未解析の実行ファイルは、同じバージョン番号でも受け付けません。対応する実行ファイルの一覧は `tools/source_profiles.py` にあります。
+
+旧バージョンの取得方法は[Factorio公式Wiki](https://wiki.factorio.com/Install_guide#Downloading_and_installing_old_versions)に説明されています。最新版の番号は[公式の配布情報](https://factorio.com/api/latest-releases)で確認できます。
+
+## ビルドし直す
+
+Apple SiliconのMac、XcodeとiOS SDK 26以降、CMake、uvが必要です。今回使ったのはXcode 27.0とiOS SDK 27.0です。
+
+```sh
+uv run python tools/prepare_sdl.py --sdk iphoneos
+uv run python tools/build_probe.py --sdk iphoneos --uikit --bundle-data
+uv run python tools/verify.py --sdk iphoneos
+```
+
+`build/iphoneos/FactorioProbe.app` は開発用の署名を付ける前の出力です。iPadへインストールするには、Xcodeから自分のTeamで署名した製品を使います。
+
+2.0.77にはSDL 2.30.9、2.1.24にはSDL 3.4.14を使います。SDLは公式リポジトリから取得し、固定したSHA-256を検査します。ゲームのバージョンを切り替えると、ビルド先のデータも入れ替わります。
+
+## 処理を再検証する
+
+シミュレーター用アプリを作成し、Xcodeなどで起動済みのiPadシミュレーターへインストールします。
+
+```sh
+uv run python tools/prepare_sdl.py --sdk iphonesimulator
+uv run python tools/build_probe.py --sdk iphonesimulator --uikit --bundle-data
+xcrun simctl install booted build/FactorioProbe.app
+uv run python tools/check_simulation.py --mode space-age --simulator booted
+uv run python tools/check_simulation.py --mode base --simulator booted
+```
+
+検証用の設定とセーブは、Macでは `build/simulation/`、シミュレーターではアプリ内の `Documents/Factorio/validation/` に保存します。通常のセーブを使いません。ログは `reports/simulation-*.log` と `reports/simulation-*.json` に出力します。
+
+検証用シナリオは `tests/scenarios/space-age/control.lua` にあります。2.1.24で追加された `--test-scenario` を使い、処理が完了したかを確認します。
+
+## 旧版へ戻す
+
+前の作業で用意した2.0.77の通常版は `build/source/factorio-2.0.77.app` に残っています。署名済みの旧版アプリも `build/preserved/2.0.77-base/FactorioProbe.app` に退避しています。
+
+ビルド元を旧版に戻す場合は、次を実行します。
+
+```sh
+uv run python tools/setup.py --app build/source/factorio-2.0.77.app
+```
+
+[公式の2.1の案内](https://factorio.com/blog/post/fff-444)では、2.1で更新したセーブやブループリントは2.0へ戻せないと説明されています。旧版のセーブは別に保管してください。
+
+## コードを検査する
 
 ```sh
 uv run pytest
-uv run ruff check tools/audit.py tools/config.py tools/setup.py tests/test_source.py tests/test_sdk_exports.py
-uv run ty check tools/audit.py tools/config.py tools/setup.py tests/test_source.py tests/test_sdk_exports.py
+uv run ruff check tools/source_profiles.py tools/config.py tools/setup.py tools/audit.py tools/macho.py tools/entrypoint.py tools/build_probe.py tools/prepare_sdl.py tools/verify.py tools/bundle_assets.py tools/check_simulation.py tools/run_probe.py tests/test_*.py
+uv run ty check tools/source_profiles.py tools/config.py tools/setup.py tools/audit.py tools/macho.py tools/entrypoint.py tools/build_probe.py tools/prepare_sdl.py tools/verify.py tools/bundle_assets.py tools/check_simulation.py tools/run_probe.py tests/test_*.py
 ```
 
-テストはFactorio本体を使わずに、実行ファイルの不一致、データとアプリのバージョンの不一致、不完全なアプリの拒否を確認します。保存したコピーが元の更新から独立していることと、既存の保存先を上書きしないことも確認します。
+Pythonのテストは、対応していない実行ファイルや不完全なデータの拒否、保存したコピーの独立性、データの入れ替え、SDKの読み取り、パッチ前後の命令、データ領域の拡張、検証ログの判定を確認します。ゲーム本体はテストに含めません。
 
-SDKのテストでは、Xcode 27のARM64向け情報、ライブラリが再公開するAPIの読み取り、循環する参照の終了を確認します。macOSとMac Catalystなど、別の対象OSのAPIを除外できることも確認しています。
+Objective-Cには、以前から使っているAPIの非推奨警告が2件残っています。

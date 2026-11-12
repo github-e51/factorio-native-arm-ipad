@@ -1,7 +1,7 @@
 [project]
 name = "factorio-native-arm-ipad"
 version = "0.1.0"
-description = "Build an experimental iPad port from an owned Factorio 2.0.77 installation"
+description = "Build an experimental iPad port from owned Factorio 2.0.77 or 2.1.24 Space Age installations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -7,7 +7,11 @@
 #include <string.h>
 
 typedef int (*MainFunction)(int, char **);
+#if FACTORIO_SDL_MAJOR == 3
+typedef int (*UIKitRunApp)(int, char **, MainFunction, void *);
+#else
 typedef int (*UIKitRunApp)(int, char **, MainFunction);
+#endif
 extern void PrepareMetalCompatibility(id<MTLDevice> device);
 extern void InstallTouchControls(void);
 
@@ -68,13 +72,20 @@ int ProbeMain(int argc, char **argv) {
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i],"--version") || !strcmp(argv[i],"--help") ||
             !strcmp(argv[i],"--create") || !strcmp(argv[i],"--benchmark") ||
-            !strcmp(argv[i],"--generate-map-preview")) return original(argc,argv);
+            !strcmp(argv[i],"--generate-map-preview") || !strcmp(argv[i],"--test-scenario") ||
+            !strcmp(argv[i],"--test-save")) return original(argc,argv);
     }
     @autoreleasepool {
         NSString *frameworks = [[NSBundle mainBundle] bundlePath];
+#if FACTORIO_SDL_MAJOR == 3
+        NSString *sdl = [frameworks stringByAppendingPathComponent:@"Frameworks/libSDL3.dylib"];
+        const char *runSymbol="SDL_RunApp";
+#else
         NSString *sdl = [frameworks stringByAppendingPathComponent:@"Frameworks/libSDL2.dylib"];
+        const char *runSymbol="SDL_UIKitRunApp";
+#endif
         void *handle = dlopen(sdl.fileSystemRepresentation, RTLD_NOW|RTLD_LOCAL);
-        UIKitRunApp run = handle ? (UIKitRunApp)dlsym(handle,"SDL_UIKitRunApp") : NULL;
+        UIKitRunApp run = handle ? (UIKitRunApp)dlsym(handle,runSymbol) : NULL;
         if (!run) { fprintf(stderr,"FACTORIO_PROBE: SDL UIKit load failed: %s\n",dlerror()); return 1; }
         id<MTLDevice> device=MTLCreateSystemDefaultDevice();
         PrepareMetalCompatibility(device);
@@ -83,6 +94,10 @@ int ProbeMain(int argc, char **argv) {
                 [device supportsFamily:MTLGPUFamilyApple7],[device supportsFamily:MTLGPUFamilyApple3]);
         fprintf(stderr,"FACTORIO_PROBE: entering UIKit with original game main\n");
         InstallTouchControls();
+#if FACTORIO_SDL_MAJOR == 3
+        return run(argc,argv,original,NULL);
+#else
         return run(argc,argv,original);
+#endif
     }
 }

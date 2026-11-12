@@ -10,7 +10,7 @@ from typing import TypedDict
 
 import yaml
 from config import DEFAULT_APP, ROOT, validate_source
-from macho import MachO
+from macho import MachO, Symbol
 
 
 class LibraryAudit(TypedDict):
@@ -20,7 +20,7 @@ class LibraryAudit(TypedDict):
     mobile: str
     sdk_has_exports: bool
     import_count: int
-    missing: list[dict[str, object]]
+    missing: list[Symbol]
 
 
 class TBDLoader(yaml.SafeLoader):
