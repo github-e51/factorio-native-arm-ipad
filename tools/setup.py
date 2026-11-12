@@ -1,44 +1,78 @@
-#!/usr/bin/env python3
-"""Validate local prerequisites and prepare an isolated Python environment."""
+"""Validate local prerequisites and optionally preserve the supported Steam app."""
+
 import argparse
 import json
+import logging
 import platform
 import shutil
 import subprocess
 import sys
-import venv
+import tempfile
 from pathlib import Path
-from config import ROOT, CONFIG_PATH, DEFAULT_APP, validate_source
 
-def main():
+from config import CONFIG_PATH, DEFAULT_APP, PRESERVED_APP, ROOT, validate_source
+
+logger = logging.getLogger(__name__)
+
+
+def preserve_source(source: Path, destination: Path = PRESERVED_APP) -> Path:
+    """Publish a validated private copy without replacing an existing directory."""
+    source = source.resolve()
+    destination = destination.resolve()
+    validate_source(source)
+    if destination.exists():
+        validate_source(destination)
+        return destination
+    if destination.is_relative_to(source):
+        raise ValueError("The preserved app must be outside the original app")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".factorio-", dir=destination.parent) as staging:
+        candidate = Path(staging) / "factorio.app"
+        shutil.copytree(source, candidate, symlinks=True)
+        validate_source(candidate)
+        candidate.rename(destination)
+    return destination
+
+
+def main() -> None:
+    """Check tools, synchronize uv dependencies, and save validated local paths."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--app', type=Path, default=DEFAULT_APP, help='Your original macOS factorio.app')
+    parser.add_argument("--app", type=Path, default=DEFAULT_APP, help="Your macOS factorio.app")
+    parser.add_argument("--preserve-source", action="store_true", help="Keep a copy under build/source")
+    parser.add_argument("--check", action="store_true", help="Validate app and tools without writing files")
     args = parser.parse_args()
-    if sys.version_info < (3, 12):
-        parser.error('Python 3.12 or newer is required.')
-    if sys.platform != 'darwin' or platform.machine() != 'arm64':
-        parser.error('Run natively on an Apple Silicon Mac (not under Rosetta).')
+    if sys.version_info < (3, 12):  # noqa: UP036 -- also support direct invocation outside uv
+        parser.error("Python 3.12 or newer is required.")
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        parser.error("Run natively on an Apple Silicon Mac (not under Rosetta).")
     app = args.app.expanduser().resolve()
     try:
         validate_source(app)
     except ValueError as error:
         parser.error(str(error))
-    cmake = shutil.which('cmake')
+    cmake = shutil.which("cmake")
     if not cmake:
-        parser.error('CMake is missing. Install it and ensure cmake is in PATH, then retry.')
-    subprocess.run(['xcodebuild', '-version'], check=True)
-    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
-    if int(sdk.split('.')[0]) < 26:
-        parser.error(f'iOS SDK 26 or newer is required; found {sdk}. Select the full Xcode installation.')
-    for directory in ('build', 'reports'):
+        parser.error("CMake is missing. Install it and retry.")
+    subprocess.run(["xcodebuild", "-version"], check=True)
+    sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-version"], text=True).strip()
+    if int(sdk.split(".")[0]) < 26:
+        parser.error(f"iOS SDK 26 or newer is required; found {sdk}.")
+    if args.check:
+        logger.info("Source and build tools verified. No app has been built or installed.")
+        return
+    uv = shutil.which("uv")
+    if not uv:
+        parser.error("uv is required. Install uv, then run uv sync --locked.")
+    subprocess.run([uv, "sync", "--locked", "--project", str(ROOT)], check=True)
+    for directory in ("build", "reports"):
         (ROOT / directory).mkdir(exist_ok=True)
-    python = ROOT / '.venv/bin/python'
-    if not python.exists():
-        venv.EnvBuilder(with_pip=True).create(ROOT / '.venv')
-    subprocess.run([str(python), '-m', 'pip', 'install', '-r', str(ROOT / 'requirements.txt')], check=True)
-    CONFIG_PATH.write_text(json.dumps({'factorio_app': str(app), 'cmake': cmake}, indent=2) + '\n')
-    print('\nSetup complete. Local paths are saved in ignored .local-config.json.')
-    print('Open FactorioProbe.xcodeproj, select your development team and connected iPad, then Run.')
+    if args.preserve_source:
+        app = preserve_source(app)
+    CONFIG_PATH.write_text(json.dumps({"factorio_app": str(app), "cmake": cmake}, indent=2) + "\n")
+    logger.info("Setup complete. Source: %s", app)
+    logger.info("Local paths are saved in .local-config.json. See docs/IPAD_SETUP.ja.md.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

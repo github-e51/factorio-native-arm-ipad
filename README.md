@@ -1,5 +1,23 @@
 # Factorio on iPad — experimental local port
 
+## 日本語の準備手順
+
+SteamでFactorio 2.0.77の通常版を取得し、iPadを接続する前にビルドする手順を
+[iPadで動かすための準備](docs/IPAD_SETUP.ja.md) にまとめています。
+Space Age版は対象外です。`uv sync --locked` のあとに
+`uv run python tools/setup.py --preserve-source` を実行すると、検査したアプリを
+`build/source/factorio-2.0.77.app` に保存してビルド元に設定します。
+Steam側の更新後も保存したコピーを使えます。実行ファイルのハッシュ検査は維持しています。
+
+Python環境の設定は `pyproject.toml` と `uv.lock` にあります。
+`uv run pytest` で入力の検査とコピーの保存処理をテストできます。
+Factorio本体と実機が必要な検証は、通常のテストには含みません。
+
+2026年11月12日にXcode 27.0とiOS SDK 27.0で、通常版2.0.77のアプリを生成し、
+開発用署名と実行ファイルの検証を完了しました。SDK 27のライブラリ情報を読む処理も
+更新済みです。Pythonのテスト18件、変更したPythonファイルのruffとtyによる検査が
+通っています。次はiPadへのインストールと実機での確認です。
+
 This repository builds a development-signed iPad app from **your own macOS
 installation of Factorio**. Game simulation, graphics, audio, and saves then run
 locally on the iPad. Playing requires no Mac or streaming connection; the Mac is
@@ -52,10 +70,10 @@ cmake --version
 
 If `xcodebuild` points only to Command Line Tools, select the full Xcode
 installation under **Xcode → Settings → Locations → Command Line Tools**.
-If you already use Homebrew, you can install Python and CMake with:
+If you already use Homebrew, you can install uv and CMake with:
 
 ```sh
-brew install python cmake
+brew install uv cmake
 ```
 
 The first build needs an internet connection to download PyYAML, SDL, and, if
@@ -80,22 +98,24 @@ the verified executable.
 For the standard Steam installation, run:
 
 ```sh
-python3 tools/setup.py
+uv run python tools/setup.py
 ```
 
 For a different installation location:
 
 ```sh
-python3 tools/setup.py --app "/path/to/your/factorio.app"
+uv run python tools/setup.py --app "/path/to/your/factorio.app"
 ```
 
-Setup checks the original hash and tools, creates `.venv`, installs the pinned
-Python dependency, and writes local paths to `.local-config.json`.
+Setup checks the original hash, matching base-data version and tools, uses
+`uv sync --locked` to prepare `.venv`, and writes local paths to `.local-config.json`.
 That file is excluded by `.gitignore`. See also
 [`local-config.example.json`](local-config.example.json).
 
-If you see `Unsupported Factorio executable`, stop and provide your own matching
-installation. **Do not remove the hash check:** the binary patches are specific
+If you see `Unsupported Factorio executable`, select 2.0.77 in Steam's Betas
+settings, disable the Space Age DLC, and wait for the download to finish.
+Use `uv run python tools/setup.py --preserve-source` to keep a private copy
+outside Steam's update directory. Do not remove the hash check: the binary patches are specific
 to this executable. Other game versions require a new analysis.
 This project does not modify the original app.
 
