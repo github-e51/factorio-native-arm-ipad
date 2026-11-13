@@ -20,8 +20,16 @@ Factorio本体と実機が必要な検証は、通常のテストには含みま
 2026年11月13日にXcode 27.0とiOS SDK 27.0で、2.1.24の開発用署名まで完了しました。
 Mac版とシミュレーターで120回の更新後のチェックサムが一致し、5惑星の生成、
 品質、宇宙プラットフォームの検証用シナリオも通っています。DLCを無効にした構成も
-確認済みです。Pythonのテスト29件と変更したPythonファイルのruff・tyによる検査が
-通っています。2.1.24での実機の描画、音声、タッチ操作は未検証です。
+確認済みです。Python経由のテスト35件と変更したPythonファイルのruff・tyによる検査が
+通っています。
+
+13インチM5 iPad Pro、iPadOS 27.3では、Space Ageの画像読み込み中に5GiBの
+メモリ上限を超えて終了する問題を修正しました。Increased Memory Limitを署名に追加し、
+画像ごとに一時メモリを解放してImageIOのキャッシュも無効にしています。
+修正版を実機へ上書きし、約30秒で初期化が完了することをログで確認しました。
+実機ではSteamを利用できないという案内の表示も、利用者が確認しました。
+画面撮影の自動テストは初期化待ちで失敗したため、メニュー画面の確認は残っています。
+2.1.24での音声、タッチ操作、大規模な工場、長時間の動作は未検証です。
 
 This repository builds a development-signed iPad app from your own macOS
 installation of Factorio. Game simulation, graphics, audio, and saves then run
@@ -152,6 +160,11 @@ Xcode can also create a Personal Team. Check whether signing works with your own
 account configuration and how long its profile remains valid; no one else's
 profiles are supplied with this repository.
 [Apple: Signing workflow](https://help.apple.com/xcode/mac/current/en.lproj/dev60b6fbbc7.html)
+
+The target requests Increased Memory Limit in `probe/FactorioProbe.entitlements`.
+Keep this capability in both the signed executable and its provisioning profile:
+Space Age sprite loading exceeded the default 5 GiB process limit on the tested
+M5 iPad. `tools/verify.py --signed-app` checks both copies of the entitlement.
 
 ## Build and launch
 
@@ -300,6 +313,7 @@ migrating saves from 2.0 to 2.1; 2.1 saves cannot be downgraded to 2.0.
 | App is reported as untrusted | First check the signature with `codesign --verify --deep --strict`; use fresh DerivedData for a broken build; if the signature is valid, follow the specific Xcode/iPad prompt |
 | Menus respond incorrectly | Switch to Tap; temporarily use Hide controls if buttons are obscured |
 | Simulator fails on BC3 / pixel format 134 | Known graphics limitation; test on a supported physical iPad |
+| Space Age exits during sprite loading with `EXC_RESOURCE` / memory limit | Rebuild with the Increased Memory Limit entitlement and a matching provisioning profile; verify the signed app before installing it over the existing app |
 | `FACTORIO_PROBE_UNIMPLEMENTED` / crash | An unimplemented platform call was reached; save the log. The port does not cover every macOS function |
 
 Build details are available in Xcode's build log and locally in

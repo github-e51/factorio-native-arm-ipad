@@ -17,11 +17,59 @@ from source_profiles import BASE_2077, SourceProfile
 
 logger = logging.getLogger(__name__)
 
+MEMORY_LIMIT_ENTITLEMENT = "com.apple.developer.kernel.increased-memory-limit"
+
 
 def require(condition: object, message: str) -> None:
     """Stop verification when an invariant does not hold."""
     if not condition:
         raise RuntimeError(message)
+
+
+def parse_signature_entitlements(signature: bytes | bytearray) -> dict[str, object]:
+    """Read the signed XML entitlement slot without relying on display-tool formatting."""
+    require(len(signature) >= 12, "Truncated code signature")
+    magic, length, count = struct.unpack_from(">III", signature)
+    require(
+        magic == 0xFADE0CC0 and length <= len(signature),
+        "Invalid code signature container",
+    )
+    require(12 + count * 8 <= length, "Truncated code signature index")
+    for index in range(count):
+        slot, offset = struct.unpack_from(">II", signature, 12 + index * 8)
+        if slot != 5:
+            continue
+        require(
+            offset >= 12 + count * 8 and offset + 8 <= length,
+            "Invalid entitlement offset",
+        )
+        blob_magic, blob_length = struct.unpack_from(">II", signature, offset)
+        require(
+            blob_magic == 0xFADE7171
+            and blob_length >= 8
+            and offset + blob_length <= length,
+            "Invalid entitlement blob",
+        )
+        entitlements = plistlib.loads(
+            bytes(signature[offset + 8 : offset + blob_length])
+        )
+        require(isinstance(entitlements, dict), "Entitlements must be a dictionary")
+        return entitlements
+    raise RuntimeError("Signed app has no XML entitlement slot")
+
+
+def signed_entitlements(binary: Path) -> dict[str, object]:
+    """Extract the embedded signature's requested application capabilities."""
+    macho = MachO(binary)
+    for command, offset, _ in macho.commands:
+        if command == 0x1D:
+            start, size = struct.unpack_from("<II", macho.data, offset + 8)
+            require(
+                start + size <= len(macho.data),
+                "Code signature extends beyond executable",
+            )
+            return parse_signature_entitlements(macho.data[start : start + size])
+    raise RuntimeError("Executable is not signed")
 
 
 def benchmark_checksum(log: str) -> str:
@@ -269,6 +317,26 @@ def main() -> None:
             "Xcode product source profile differs",
         )
         signed_macho = MachO(signed_app / "FactorioProbe")
+        entitlements = signed_entitlements(signed_app / "FactorioProbe")
+        require(
+            entitlements.get(MEMORY_LIMIT_ENTITLEMENT) is True,
+            "Missing Increased Memory Limit entitlement",
+        )
+        profile_data = plistlib.loads(
+            subprocess.check_output(
+                [
+                    "security",
+                    "cms",
+                    "-D",
+                    "-i",
+                    str(signed_app / "embedded.mobileprovision"),
+                ]
+            )
+        )
+        require(
+            profile_data.get("Entitlements", {}).get(MEMORY_LIMIT_ENTITLEMENT) is True,
+            "Provisioning profile does not allow Increased Memory Limit",
+        )
         for section in patched.sections:
             if section["offset"] and section["size"]:
                 start, end = section["offset"], section["offset"] + section["size"]
@@ -280,6 +348,7 @@ def main() -> None:
         report["development_signed_app"] = {
             "path": str(signed_app),
             "bundle_id": identifier,
+            "increased_memory_limit": True,
         }
     (ROOT / "reports/verification.json").write_text(json.dumps(report, indent=2) + "\n")
     logger.info("%s", json.dumps(report, indent=2))

@@ -1,12 +1,12 @@
 # iPadで動かすための準備
 
-Factorio 2.1.24、build 87808のSteam版Space Ageを、iPad用アプリとしてビルドできるようにしました。2026年11月13日時点で、ビルド、開発用署名、シミュレーターでの処理の検証まで完了しています。iPadへのインストールと起動は行っていません。
+Factorio 2.1.24、build 87808のSteam版Space Ageを、iPad用アプリとしてビルドできます。2026年11月13日に、起動中のメモリ不足を修正したアプリをiPadへ上書きし、ゲームの初期化が完了することをログで確認しました。
 
 ## 準備済みのアプリを使う
 
-署名済みアプリは `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app` にあります。Bundle Identifierは `org.lenhirata.factorioipad` です。Macとペアリング済みの13インチM5 iPad Proを署名対象に含めています。署名の有効期限は2026年11月19日23時42分です。時刻は日本時間です。
+署名済みアプリは `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app` にあります。Bundle Identifierは `org.lenhirata.factorioipad` です。Macとペアリング済みの13インチM5 iPad Proを署名対象に含めています。署名の有効期限は2026年11月20日12時46分です。時刻は日本時間です。
 
-このiPadはiPadOS 27.3で、デベロッパモードが有効です。iPadのロックを解除した状態で、リポジトリのフォルダーから次のコマンドを実行するとインストールできます。この準備では、まだ実行していません。
+このiPadはiPadOS 27.3で、デベロッパモードが有効です。修正版はインストール済みです。再度更新するときは、iPadのロックを解除した状態で、リポジトリのフォルダーから次のコマンドを実行します。
 
 ```sh
 xcrun devicectl device install app --device 'LenのiPad' \
@@ -34,7 +34,17 @@ Space Ageの検証用シナリオは、Mac版と移植版の両方で通りま�
 
 iPad用アプリでは、29個の実行ファイルとライブラリ、1,269箇所のSDL呼び出しの転送、Space Age・Elevated Rails・Quality・Recyclerを含むデータ、開発用署名を検証しました。記録されていないセクションの変更はありません。
 
-2.1.24での実機の描画、音声、タッチ操作、大規模な工場、長時間の動作は未検証です。シミュレーターの処理の検証は、実機での描画や操作の確認を代わりに行うものではありません。
+実機では、画像読み込み、テクスチャの転送を通過し、起動から29.6秒で `Factorio initialised` に到達しました。Steamを利用できないという案内の表示も、利用者が確認しました。画面撮影の自動テストは、iPad側の自動操作モードの有効化待ちで失敗しました。メニュー画面の確認は残っています。2.1.24での音声、タッチ操作、大規模な工場、長時間の動作は未検証です。
+
+## 起動中に終了していた原因と修正
+
+修正前のアプリは、Space Ageの画像を読み込む途中で終了していました。実機にデバッガを接続し、`EXC_RESOURCE` と5,120MiBのメモリ上限超過を確認しました。
+
+`probe/FactorioProbe.entitlements` にIncreased Memory Limitを追加しました。署名済み実行ファイルとプロビジョニングの両方に許可が含まれることを、`tools/verify.py --signed-app` で検査します。Xcodeの署名では、この権限を外さず、自分のTeamでプロビジョニングを更新してください。
+
+`probe/BitmapCompat.m` では、画像ごとに一時オブジェクトを解放し、ImageIOの画像キャッシュを無効にしました。画素の変換、並列読み込み、返した画像の寿命は、実際のImageIOを使うテストで確認しています。
+
+更新前の設定とユーザーデータは、Macの `reports/ipad-user-backup-before-memory-fix/` に保存しました。同じBundle Identifierで上書きし、アプリの削除は行っていません。ログ、バックアップ、署名済みアプリはGitの管理対象外です。
 
 ## Steamから再取得する
 
@@ -101,6 +111,6 @@ uv run ruff check tools/source_profiles.py tools/config.py tools/setup.py tools/
 uv run ty check tools/source_profiles.py tools/config.py tools/setup.py tools/audit.py tools/macho.py tools/entrypoint.py tools/build_probe.py tools/prepare_sdl.py tools/verify.py tools/bundle_assets.py tools/check_simulation.py tools/run_probe.py tests/test_*.py
 ```
 
-Pythonのテストは、対応していない実行ファイルや不完全なデータの拒否、保存したコピーの独立性、データの入れ替え、SDKの読み取り、パッチ前後の命令、データ領域の拡張、検証ログの判定を確認します。ゲーム本体はテストに含めません。
+テスト35件が通っています。対応していない実行ファイルや不完全なデータの拒否、保存したコピーの独立性、データの入れ替え、SDKの読み取り、パッチ前後の命令、データ領域の拡張、検証ログの判定、署名情報の読み取りを確認します。macOSではObjective-Cの画像処理テストもコンパイルして実行します。ゲーム本体はテストに含めません。
 
 Objective-Cには、以前から使っているAPIの非推奨警告が2件残っています。
