@@ -1,5 +1,14 @@
 #import <UIKit/UIKit.h>
+#if FACTORIO_SDL_MAJOR == 3
+#include <SDL3/SDL.h>
+#else
 #include "SDL.h"
+#define SDL_KMOD_CTRL KMOD_CTRL
+#define SDL_KMOD_ALT KMOD_ALT
+#define SDL_KMOD_GUI KMOD_GUI
+#define SDL_KMOD_SHIFT KMOD_SHIFT
+#define SDL_KMOD_CAPS KMOD_CAPS
+#endif
 
 extern void FPIKeyboard(int scan,int down);
 extern void FPIMouseButton(int button,int down);
@@ -21,9 +30,9 @@ extern int FPIGetPointer(float *x,float *y);
     if (self.inputHeld==down) return;
     self.inputHeld=down;
     if (self.scan) FPIKeyboard(self.scan,down);
-    if (down && self.text && !(SDL_GetModState()&(KMOD_CTRL|KMOD_ALT|KMOD_GUI))) {
-        BOOL shift=(SDL_GetModState()&KMOD_SHIFT)!=0;
-        BOOL caps=(SDL_GetModState()&KMOD_CAPS)!=0;
+    if (down && self.text && !(SDL_GetModState()&(SDL_KMOD_CTRL|SDL_KMOD_ALT|SDL_KMOD_GUI))) {
+        BOOL shift=(SDL_GetModState()&SDL_KMOD_SHIFT)!=0;
+        BOOL caps=(SDL_GetModState()&SDL_KMOD_CAPS)!=0;
         NSString *text=(shift!=caps) ? self.text.uppercaseString : self.text;
         if (shift && self.text.length==1) {
             NSString *plain=@"`1234567890-=[]\\;',./";

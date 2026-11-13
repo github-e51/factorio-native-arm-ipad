@@ -1,25 +1,56 @@
-# Factorio on iPad — experimental local port
+# Factorio on iPad
 
-This repository builds a development-signed iPad app from **your own macOS
-installation of Factorio**. Game simulation, graphics, audio, and saves then run
+## 日本語の準備手順
+
+Factorio 2.1.24のSteam版Space Ageを、iPad用アプリとしてビルドできます。
+2.0.77の通常版にも引き続き対応しています。
+[iPadで動かすための準備](docs/IPAD_SETUP.ja.md) に、生成したアプリの場所、
+インストール方法、検証結果、旧版へ戻す方法をまとめています。
+
+Steamで最新版とSpace Ageを取得したあと、`uv sync --locked` と
+`uv run python tools/setup.py --steam --preserve-source` を実行すると、検査したアプリを
+`build/source/factorio-2.1.24-space-age.app` に保存してビルド元に設定します。
+Steam側の更新後も、このコピーを使えます。対応する実行ファイルは
+`tools/source_profiles.py` でSHA-256と版ごとのデータを固定しています。
+
+Python環境の設定は `pyproject.toml` と `uv.lock` にあります。
+`uv run pytest` で入力の検査とコピーの保存処理をテストできます。
+Factorio本体と実機が必要な検証は、通常のテストには含みません。
+
+2026年11月13日にXcode 27.0とiOS SDK 27.0で、2.1.24の開発用署名まで完了しました。
+Mac版とシミュレーターで120回の更新後のチェックサムが一致し、5惑星の生成、
+品質、宇宙プラットフォームの検証用シナリオも通っています。DLCを無効にした構成も
+確認済みです。Python経由のテスト35件と変更したPythonファイルのruff・tyによる検査が
+通っています。
+
+13インチM5 iPad Pro、iPadOS 27.3では、Space Ageの画像読み込み中に5GiBの
+メモリ上限を超えて終了する問題を修正しました。Increased Memory Limitを署名に追加し、
+画像ごとに一時メモリを解放してImageIOのキャッシュも無効にしています。
+修正版を実機へ上書きし、約30秒で初期化が完了することをログで確認しました。
+実機ではSteamを利用できないという案内の表示も、利用者が確認しました。
+画面撮影の自動テストは初期化待ちで失敗したため、メニュー画面の確認は残っています。
+2.1.24での音声、タッチ操作、大規模な工場、長時間の動作は未検証です。
+
+This repository builds a development-signed iPad app from your own macOS
+installation of Factorio. Game simulation, graphics, audio, and saves then run
 locally on the iPad. Playing requires no Mac or streaming connection; the Mac is
 needed to build, install, and later renew the app's signing profile.
 
 The repository includes porting code, touch controls, Xcode projects, and build
-tools. **Factorio itself, game assets, prebuilt apps, certificates, and saved games
-are not included.** This is not an official client from Wube Software.
+tools. Factorio itself, game assets, prebuilt apps, certificates, and saved games
+are not included. This is not an official client from Wube Software.
 
 ## Requirements and tested configuration
 
 | Component | Requirement / tested configuration |
 |---|---|
 | Mac | Apple Silicon; run Terminal natively as ARM64, not through Rosetta |
-| Xcode | Full Xcode installation with iOS SDK 26 or newer; tested: Xcode 26.3, SDK 26.2 |
+| Xcode | Full Xcode with iOS SDK 26 or newer; latest build verified: Xcode 27.0, SDK 27.0 |
 | Python | 3.12 or newer; tested: 3.14 |
 | CMake | Available in Terminal; setup saves its path for Xcode |
-| iPad | iPadOS 26 or newer; graphics tested on an 11-inch iPad Pro **M1**, iPadOS 26.6.1 |
+| iPad | iPadOS 26 or newer; graphics tested on an 11-inch iPad Pro M1, iPadOS 26.6.1 |
 | Signing | Your own Apple Account in Xcode, a development team, and a paired iPad |
-| Game | **Factorio 2.0.77, build 84539, macOS Steam, unmodified universal executable** |
+| Game | Factorio 2.0.77 base / build 84539, or 2.1.24 Space Age / build 87808; exact macOS Steam universal executables |
 
 Other iPads and newer SDKs have not automatically been verified. The original
 Metal renderer requires suitable BC texture support, among other capabilities.
@@ -34,7 +65,7 @@ Physical keyboard and mouse support is connected through SDL but has not yet bee
 tested with real hardware. Large factories, the full range of building actions,
 and long-term stability remain unverified. See [Architecture and limitations](docs/ARCHITECTURE.md).
 
-## 1. Prepare the repository and tools
+## Prepare the repository and tools
 
 Clone the repository, or download and extract its ZIP. In Terminal, change to the
 folder containing this README and `FactorioProbe.xcodeproj`.
@@ -51,25 +82,25 @@ cmake --version
 ```
 
 If `xcodebuild` points only to Command Line Tools, select the full Xcode
-installation under **Xcode → Settings → Locations → Command Line Tools**.
-If you already use Homebrew, you can install Python and CMake with:
+installation under Xcode → Settings → Locations → Command Line Tools.
+If you already use Homebrew, you can install uv and CMake with:
 
 ```sh
-brew install python cmake
+brew install uv cmake
 ```
 
 The first build needs an internet connection to download PyYAML, SDL, and, if
-necessary, Apple signing profiles. SDL 2.30.9 is downloaded automatically from
-the official SDL repository and checked against a pinned SHA-256 hash.
+necessary, Apple signing profiles. SDL 2.30.9 for 2.0.77 or SDL 3.4.14 for 2.1.24
+is downloaded from the official SDL repository and checked against a pinned SHA-256 hash.
 
-## 2. Select your own Factorio app
+## Select your own Factorio app
 
-You need a complete installation of the supported macOS game version. Its
-executable must have this exact SHA-256 hash:
+You need a complete installation of an analyzed macOS game version.
 
-```text
-00b014d78df07e05ab1cee853904c8f7b3814ca652c043461a9d49fbad46cdf6
-```
+| Executable | Exact SHA-256 |
+|---|---|
+| 2.0.77 base | `00b014d78df07e05ab1cee853904c8f7b3814ca652c043461a9d49fbad46cdf6` |
+| 2.1.24 Space Age | `991c1182742f60cde97be2a412106670f73ba483fd1715a95e687b73c8b5250d` |
 
 The hash applies to `factorio.app/Contents/MacOS/factorio`, not the app directory
 or just its ARM64 slice. The version number alone is insufficient: other
@@ -80,34 +111,36 @@ the verified executable.
 For the standard Steam installation, run:
 
 ```sh
-python3 tools/setup.py
+uv run python tools/setup.py --steam --preserve-source
 ```
 
 For a different installation location:
 
 ```sh
-python3 tools/setup.py --app "/path/to/your/factorio.app"
+uv run python tools/setup.py --app "/path/to/your/factorio.app"
 ```
 
-Setup checks the original hash and tools, creates `.venv`, installs the pinned
-Python dependency, and writes local paths to `.local-config.json`.
+Setup checks the original hash, matching base-data version and tools, uses
+`uv sync --locked` to prepare `.venv`, and writes local paths to `.local-config.json`.
 That file is excluded by `.gitignore`. See also
 [`local-config.example.json`](local-config.example.json).
 
-If you see `Unsupported Factorio executable`, stop and provide your own matching
-installation. **Do not remove the hash check:** the binary patches are specific
-to this executable. Other game versions require a new analysis.
+For 2.1.24, select the public Steam branch and enable the Space Age DLC.
+For the 2.0.77 baseline, select 2.0.77 in Betas and disable Space Age.
+Wait for the complete download. Setup preserves the selected executable and all
+edition-specific assets outside Steam's update directory. An unrecognized hash
+requires a new analysis; keep the hash check enabled.
 This project does not modify the original app.
 
-## 3. Set up the iPad and signing
+## Set up the iPad and signing
 
 1. Connect the iPad to the Mac over USB, unlock it, and accept the trust prompt.
    Xcode must recognize the device and finish preparing it.
 2. On the iPad, enable Developer Mode under
-   **Settings → Privacy & Security → Developer Mode** and confirm the requested
+   Settings → Privacy & Security → Developer Mode and confirm the requested
    restart. If the option is missing, pair the device with Xcode first.
 3. Sign in with your own Apple Account under
-   **Xcode → Settings → Apple Accounts**.
+   Xcode → Settings → Apple Accounts.
 
 Apple documents these steps in
 [Enabling Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
@@ -117,22 +150,27 @@ and [Running apps on devices](https://developer.apple.com/documentation/xcode/ru
 open FactorioProbe.xcodeproj
 ```
 
-In Xcode, open the **FactorioProbe** target. Under **Signing & Capabilities**,
-enable **Automatically manage signing** and select your own **Team**.
-If necessary, enter your own unique **Bundle Identifier**, such as
+In Xcode, open the FactorioProbe target. Under Signing & Capabilities,
+enable Automatically manage signing and select your own Team.
+If necessary, enter your own unique Bundle Identifier, such as
 `com.yourname.factorioipad`. This identifier is also applied to the generated app.
-At the top, select the **FactorioProbe** scheme and your connected **physical iPad**.
+At the top, select the FactorioProbe scheme and your connected physical iPad.
 
 Xcode can also create a Personal Team. Check whether signing works with your own
 account configuration and how long its profile remains valid; no one else's
 profiles are supplied with this repository.
 [Apple: Signing workflow](https://help.apple.com/xcode/mac/current/en.lproj/dev60b6fbbc7.html)
 
-## 4. Build and launch
+The target requests Increased Memory Limit in `probe/FactorioProbe.entitlements`.
+Keep this capability in both the signed executable and its provisioning profile:
+Space Age sprite loading exceeded the default 5 GiB process limit on the tested
+M5 iPad. `tools/verify.py --signed-app` checks both copies of the entitlement.
 
-In Xcode, choose **Product → Run** / **⌘R**. The first build downloads and compiles
+## Build and launch
+
+In Xcode, choose Product → Run / ⌘R. The first build downloads and compiles
 SDL, generates the import audit, adapts a copy of the original executable, and
-bundles the local base-game assets. This takes time and several GB of free disk
+bundles the selected edition's local game assets, including owned DLC. This takes time and several GB of free disk
 space. Xcode then signs the app and libraries and installs them.
 
 The build intentionally uses a shell script phase: Xcode first compiles a small
@@ -141,11 +179,11 @@ Edit files in `probe/` directly; you do not need to add them separately to
 “Compile Sources.”
 
 The initial graphical startup took about 20–30 seconds on the tested device.
-Dismiss the Steam unavailable message with **Confirm**; Steam login and Steam
+Dismiss the Steam unavailable message with Confirm; Steam login and Steam
 features are unavailable. Close the changelog if it appears. Then start a
 tutorial or a base-game session from the main menu.
 
-Once installed, **Factorio Probe** can be opened directly on the iPad, and you can
+Once installed, Factorio Probe can be opened directly on the iPad, and you can
 disconnect the USB cable. Normal play does not require the XCTest helper.
 Automatic crash-log uploading is disabled in the local build.
 
@@ -173,8 +211,8 @@ xcodebuild \
 
 The installable product is generated at
 `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app`.
-**`build/iphoneos/FactorioProbe.app` is only ad hoc signed and cannot be installed
-directly on the iPad.**
+`build/iphoneos/FactorioProbe.app` is only ad hoc signed and cannot be installed
+directly on the iPad.
 
 Verify the signature, game binary sections, and identifier:
 
@@ -218,10 +256,10 @@ the same app and its existing data are updated.
 
 The mode button at the top cycles through:
 
-- **Tap:** Touching the screen clicks directly. Use this for normal menu interaction.
-- **Mine:** Holding a finger on a tree or ore acts as holding the right mouse
+- Tap: Touching the screen clicks directly. Use this for normal menu interaction.
+- Mine: Holding a finger on a tree or ore acts as holding the right mouse
   button. Switch back to Tap for menus.
-- **Cursor:** Touch positions a visible white arrow without clicking. Then press
+- Cursor: Touch positions a visible white arrow without clicking. Then press
   one of the three mouse buttons. The arrow tip marks the click position. To drag,
   hold a mouse button and slide a second finger across the game area. Building
   actions involving multiple fingers still need further device testing.
@@ -232,7 +270,7 @@ inventory filters. The exact effect depends on the game context and key bindings
 Separate mouse buttons are not needed for ordinary tapping.
 
 Connect an external keyboard and mouse directly to the iPad and select
-**Hide controls**. SDL includes hardware keyboard, mouse movement, mouse button,
+Hide controls. SDL includes hardware keyboard, mouse movement, mouse button,
 and scrolling support, but the complete hardware workflow remains untested.
 Controllers are currently disabled.
 
@@ -257,8 +295,10 @@ xcrun devicectl device copy from \
 Signing validity depends on your own development profile. When it expires,
 rebuild and reinstall using your own team. Do not delete the app for
 troubleshooting before backing up saves: uninstalling removes its local data.
-A Steam game update may cause the next build to fail the hash check; an already
-installed iPad app contains its own copy of the game assets.
+A Steam update does not affect the source preserved by setup. An unpreserved
+Steam source may fail the next build's hash check after an update. An installed
+iPad app contains its own copy of the assets. Keep separate backups before
+migrating saves from 2.0 to 2.1; 2.1 saves cannot be downgraded to 2.0.
 
 ## Troubleshooting
 
@@ -273,10 +313,11 @@ installed iPad app contains its own copy of the game assets.
 | App is reported as untrusted | First check the signature with `codesign --verify --deep --strict`; use fresh DerivedData for a broken build; if the signature is valid, follow the specific Xcode/iPad prompt |
 | Menus respond incorrectly | Switch to Tap; temporarily use Hide controls if buttons are obscured |
 | Simulator fails on BC3 / pixel format 134 | Known graphics limitation; test on a supported physical iPad |
+| Space Age exits during sprite loading with `EXC_RESOURCE` / memory limit | Rebuild with the Increased Memory Limit entitlement and a matching provisioning profile; verify the signed app before installing it over the existing app |
 | `FACTORIO_PROBE_UNIMPLEMENTED` / crash | An unimplemented platform call was reached; save the log. The port does not cover every macOS function |
 
 Build details are available in Xcode's build log and locally in
-`reports/sdl-configure-iphoneos.log` and `reports/sdl-build-iphoneos.log`.
+`reports/sdl3-iphoneos-configure.log` and `reports/sdl3-iphoneos-build.log`.
 Copy the current game log with:
 
 ```sh

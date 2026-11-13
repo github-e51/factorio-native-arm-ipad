@@ -3,10 +3,86 @@
 No runtime executable-memory writes. The original game entry remains intact.
 This is intentionally limited to the audited classic dyld-info Mach-O layout.
 """
-import struct
-from macho import MachO
 
-def uleb(value):
+import struct
+from pathlib import Path
+
+from macho import MachO
+from source_profiles import BASE_2077, InstructionPatch, SourceProfile
+
+
+def apply_instruction_patch(
+    macho: MachO, patch: InstructionPatch, name: str
+) -> dict[str, object]:
+    """Apply a profile's patch only when its original instruction bytes match."""
+    symbol = next(
+        (item for item in macho.symbols() if item["name"] == patch.symbol), None
+    )
+    if symbol is None:
+        raise ValueError(f"Missing patch target: {patch.symbol}")
+    section = macho.sections[symbol["section"] - 1]
+    offset = section["offset"] + symbol["address"] - section["address"] + patch.offset
+    if not patch.original or len(patch.original) != len(patch.replacement):
+        raise ValueError("Instruction patches must preserve their byte length")
+    if (
+        not section["offset"]
+        <= offset
+        <= section["offset"] + section["size"] - len(patch.original)
+    ):
+        raise ValueError("Instruction patch lies outside its original section")
+    if macho.data[offset : offset + len(patch.original)] != patch.original:
+        raise ValueError(
+            f"Unexpected original instruction in {patch.symbol}+{patch.offset}"
+        )
+    macho.data[offset : offset + len(patch.replacement)] = patch.replacement
+    return {
+        "name": name,
+        "offset": offset,
+        "original_bytes": patch.original.hex(),
+        "patched_bytes": patch.replacement.hex(),
+    }
+
+
+def reserve_zero_fill(macho: MachO, required_end: int) -> dict[str, int]:
+    """Extend the final data segment's zero-fill space without moving file bytes."""
+    segments = [
+        (position, bytes(macho.data[position + 8 : position + 24]).rstrip(b"\0"))
+        for command, position, _ in macho.commands
+        if command == 0x19
+    ]
+    data_position = next(position for position, name in segments if name == b"__DATA")
+    link_position = next(
+        position for position, name in segments if name == b"__LINKEDIT"
+    )
+    data_vm, old_size = struct.unpack_from("<QQ", macho.data, data_position + 24)
+    link_vm = struct.unpack_from("<Q", macho.data, link_position + 24)[0]
+    new_size = max(old_size, (required_end - data_vm + 16383) & ~16383)
+    new_link_vm = max(link_vm, data_vm + new_size)
+    if new_size != old_size:
+        if any(section["segment"] == "__LINKEDIT" for section in macho.sections):
+            raise ValueError("Cannot relocate a LINKEDIT segment containing sections")
+        for position, name in segments:
+            if name in (b"__DATA", b"__LINKEDIT", b"__PAGEZERO"):
+                continue
+            address, size = struct.unpack_from("<QQ", macho.data, position + 24)
+            if address + size > data_vm:
+                raise ValueError("Only the final data segment can grow")
+        struct.pack_into("<Q", macho.data, data_position + 32, new_size)
+        # LINKEDIT contains loader tables addressed by file offsets, not game
+        # sections. Only its mapping address changes; all file offsets stay fixed.
+        struct.pack_into("<Q", macho.data, link_position + 24, new_link_vm)
+    return {
+        "data_vm_size_before": old_size,
+        "data_vm_size_after": new_size,
+        "linkedit_vm_before": link_vm,
+        "linkedit_vm_after": new_link_vm,
+    }
+
+
+def uleb(value: int) -> bytearray:
+    """Encode a nonnegative dyld binding operand as an unsigned LEB128 value."""
+    if value < 0:
+        raise ValueError("ULEB128 requires a nonnegative value")
     out = bytearray()
     while value >= 128:
         out.append((value & 127) | 128)
@@ -14,119 +90,204 @@ def uleb(value):
     out.append(value)
     return out
 
-def bind_end(stream):
+
+def bind_end(stream: bytes | bytearray) -> int:
+    """Find the first BIND_DONE opcode without treating operand zeroes as opcodes."""
     p = 0
     while p < len(stream):
         at = p
-        op = stream[p] & 0xf0
+        op = stream[p] & 0xF0
         p += 1
         if op == 0:
             return at
         if op == 0x40:
-            p = stream.index(0, p)+1
-        elif op in (0x20,0x60,0x70,0x80,0xa0,0xc0):
-            for _ in range(2 if op == 0xc0 else 1):
+            p = stream.index(0, p) + 1
+        elif op in (0x20, 0x60, 0x70, 0x80, 0xA0, 0xC0):
+            for _ in range(2 if op == 0xC0 else 1):
                 while stream[p] & 128:
                     p += 1
                 p += 1
-        elif op not in (0x10,0x30,0x50,0x90,0xb0):
-            raise ValueError(f'Unsupported bind opcode {op:x}')
-    raise ValueError('No BIND_DONE')
+        elif op not in (0x10, 0x30, 0x50, 0x90, 0xB0):
+            raise ValueError(f"Unsupported bind opcode {op:x}")
+    raise ValueError("No BIND_DONE")
 
-def inject_entry(path, sdl_path=None, simulator_metal=False):
+
+def inject_entry(
+    path: Path,
+    sdl_path: Path | None = None,
+    simulator_metal: bool = False,
+    profile: SourceProfile = BASE_2077,
+) -> dict[str, object]:
+    """Inject static SDL redirects and only the selected build's audited patches."""
     m = MachO(path)
     data = m.data
-    assert all(c != 0x1d for c,p,n in m.commands), 'Inject before codesign'
-    segments = [(p, bytes(data[p+8:p+24]).rstrip(b'\0')) for c,p,n in m.commands if c==0x19]
-    seg_index, (segment, _) = next((i,s) for i,s in enumerate(segments) if s[1]==b'__DATA_CONST')
-    vm, vmsize, fileoff, filesize = struct.unpack_from('<QQQQ',data,segment+24)
-    last = max(s['offset']+s['size'] for s in m.sections if s['segment']=='__DATA_CONST')
-    slot = (last+7) & ~7
-    assert slot+8 <= fileoff+filesize and data[slot:slot+8] == bytes(8)
-    first = min(s['offset'] for s in m.sections if s['offset']>0)
+    assert all(c != 0x1D for c, p, n in m.commands), "Inject before codesign"
+    segments = [
+        (p, bytes(data[p + 8 : p + 24]).rstrip(b"\0"))
+        for c, p, n in m.commands
+        if c == 0x19
+    ]
+    seg_index, (segment, _) = next(
+        (i, s) for i, s in enumerate(segments) if s[1] == b"__DATA_CONST"
+    )
+    vm, _vmsize, fileoff, filesize = struct.unpack_from("<QQQQ", data, segment + 24)
+    last = max(
+        s["offset"] + s["size"] for s in m.sections if s["segment"] == "__DATA_CONST"
+    )
+    slot = (last + 7) & ~7
+    assert slot + 8 <= fileoff + filesize and data[slot : slot + 8] == bytes(8)
+    first = min(s["offset"] for s in m.sections if s["offset"] > 0)
     redirects = []
     if sdl_path:
-        exports = {s['name'] for s in MachO(sdl_path).symbols() if s['type']&1 and 'library' not in s}
+        exports = {
+            s["name"]
+            for s in MachO(sdl_path).symbols()
+            if s["type"] & 1 and "library" not in s
+        }
         for s in m.symbols():
-            if s['name'].startswith('_SDL_') and s['name'] in exports and 'library' not in s:
-                section = m.sections[s['section']-1]
-                if section['name']=='__text':
+            if (
+                s["name"].startswith("_SDL_")
+                and s["name"] in exports
+                and "library" not in s
+            ):
+                section = m.sections[s["section"] - 1]
+                if section["name"] == "__text":
                     redirects.append(s)
-    stub = (first-16*(1+len(redirects))) & ~15
-    assert stub >= 32+struct.unpack_from('<I',data,20)[0]
-    assert data[stub:stub+16*(1+len(redirects))] == bytes(16*(1+len(redirects)))
-    text = next(p for p,name in segments if name==b'__TEXT')
-    base = struct.unpack_from('<Q',data,text+24)[0]
-    def trampoline(at, pointer_vm):
-        pc = base+at
+    stride = 12 if profile.sdl_major == 3 else 16
+    stub = (first - stride * (1 + len(redirects))) & ~15
+    assert stub >= 32 + struct.unpack_from("<I", data, 20)[0]
+    assert data[stub : stub + stride * (1 + len(redirects))] == bytes(
+        stride * (1 + len(redirects))
+    )
+    text = next(p for p, name in segments if name == b"__TEXT")
+    base = struct.unpack_from("<Q", data, text + 24)[0]
+
+    def trampoline(at: int, pointer_vm: int) -> None:
+        """Write ADRP/LDR/BR to an immutable dyld-bound pointer slot."""
+        pc = base + at
         pages = ((pointer_vm & ~4095) - (pc & ~4095)) >> 12
-        assert -(1<<20) <= pages < (1<<20)
-        adrp = 0x90000010 | ((pages & 3)<<29) | (((pages>>2)&0x7ffff)<<5)
-        ldr = 0xf9400210 | (((pointer_vm & 4095)//8)<<10)
-        data[at:at+16] = struct.pack('<4I',adrp,ldr,0xd61f0200,0xd503201f)
-    trampoline(stub, vm+slot-fileoff)
-    dyld = next(p for c,p,n in m.commands if c==0x80000022)
-    bindoff, bindsize = struct.unpack_from('<II',data,dyld+16)
-    oldbind = data[bindoff:bindoff+bindsize]
+        assert -(1 << 20) <= pages < (1 << 20)
+        adrp = 0x90000010 | ((pages & 3) << 29) | (((pages >> 2) & 0x7FFFF) << 5)
+        ldr = 0xF9400210 | (((pointer_vm & 4095) // 8) << 10)
+        instructions = struct.pack("<3I", adrp, ldr, 0xD61F0200)
+        if stride == 16:
+            instructions += struct.pack("<I", 0xD503201F)
+        data[at : at + stride] = instructions
+
+    trampoline(stub, vm + slot - fileoff)
+    dyld = next(p for c, p, n in m.commands if c == 0x80000022)
+    bindoff, bindsize = struct.unpack_from("<II", data, dyld + 16)
+    oldbind = data[bindoff : bindoff + bindsize]
+
     # Ordinal 1 is P00.dylib, which reexports ProbeShim. Reset bind state explicitly.
-    def binding_for(symbol,index,offset):
-        return b'\x11\x40'+symbol.encode()+b'\0\x51\x60\0'+bytes([0x70|index])+uleb(offset)+b'\x90'
-    extra = binding_for('_ProbeMain',seg_index,slot-fileoff)
-    data_index,(data_segment,_) = next((i,s) for i,s in enumerate(segments) if s[1]==b'__DATA')
-    data_vm,data_vmsize,data_off,data_size = struct.unpack_from('<QQQQ',data,data_segment+24)
-    bss_end = max(s['address']+s['size'] for s in m.sections if s['segment']=='__DATA')
-    bss_slot = (bss_end+7)&~7
-    const_slot = slot+8
+    def binding_for(symbol: str, index: int, offset: int) -> bytes:
+        """Bind a facade symbol to a pointer slot in the specified segment."""
+        return (
+            b"\x11\x40"
+            + symbol.encode()
+            + b"\0\x51\x60\0"
+            + bytes([0x70 | index])
+            + uleb(offset)
+            + b"\x90"
+        )
+
+    extra = binding_for("_ProbeMain", seg_index, slot - fileoff)
+    data_index, (data_segment, _) = next(
+        (i, s) for i, s in enumerate(segments) if s[1] == b"__DATA"
+    )
+    data_vm, data_vmsize, _data_off, data_size = struct.unpack_from(
+        "<QQQQ", data, data_segment + 24
+    )
+    bss_end = max(
+        s["address"] + s["size"] for s in m.sections if s["segment"] == "__DATA"
+    )
+    bss_slot = (bss_end + 7) & ~7
+    const_slot = slot + 8
+    constant_slots = (fileoff + filesize - const_slot) // 8
+    spill_slots = max(0, len(redirects) - constant_slots)
+    zero_fill_growth = reserve_zero_fill(m, bss_slot + 8 * spill_slots)
+    data_vmsize = zero_fill_growth["data_vm_size_after"]
     changes = []
-    for i,symbol in enumerate(redirects):
-        at = stub+16*(i+1)
-        if const_slot+8 <= fileoff+filesize:
-            assert data[const_slot:const_slot+8]==bytes(8)
-            pointer_vm = vm+const_slot-fileoff
-            extra += binding_for(symbol['name'],seg_index,const_slot-fileoff)
+    for i, symbol in enumerate(redirects):
+        at = stub + stride * (i + 1)
+        if const_slot + 8 <= fileoff + filesize:
+            assert data[const_slot : const_slot + 8] == bytes(8)
+            pointer_vm = vm + const_slot - fileoff
+            extra += binding_for(symbol["name"], seg_index, const_slot - fileoff)
             const_slot += 8
         else:
-            assert bss_slot>=data_vm+data_size and bss_slot+8<=data_vm+data_vmsize, 'Insufficient zero-fill padding'
+            assert (
+                bss_slot >= data_vm + data_size
+                and bss_slot + 8 <= data_vm + data_vmsize
+            ), "Insufficient zero-fill padding"
             pointer_vm = bss_slot
-            extra += binding_for(symbol['name'],data_index,bss_slot-data_vm)
+            extra += binding_for(symbol["name"], data_index, bss_slot - data_vm)
             bss_slot += 8
-        trampoline(at,pointer_vm)
-        offset = symbol['address']-base
-        displacement = base+at-symbol['address']
-        assert displacement % 4 == 0 and -(1<<27)<=displacement<(1<<27)
-        before = data[offset:offset+4].hex()
-        struct.pack_into('<I',data,offset,0x14000000|((displacement>>2)&0x3ffffff))
-        changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
+        trampoline(at, pointer_vm)
+        offset = symbol["address"] - base
+        displacement = base + at - symbol["address"]
+        assert displacement % 4 == 0 and -(1 << 27) <= displacement < (1 << 27)
+        before = data[offset : offset + 4].hex()
+        struct.pack_into(
+            "<I", data, offset, 0x14000000 | ((displacement >> 2) & 0x3FFFFFF)
+        )
+        changes.append(
+            {
+                "name": symbol["name"],
+                "offset": offset,
+                "original_bytes": before,
+                "patched_bytes": data[offset : offset + 4].hex(),
+                "trampoline": at,
+            }
+        )
     platform_patches = []
     if sdl_path:
         # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
         # to append a CGDirectDisplayID to a log message. UIKit has different
         # driverdata. Preserve the display name, bounds, pixel format and Hz log.
-        log = next(s for s in m.symbols() if s['name']=='__ZN9SDLWindow18logDisplayAdaptersEv')
-        at = log['address']-base+424
-        assert struct.unpack_from('<I',data,at)[0] == 0xaa1403e0
-        struct.pack_into('<I',data,at,0x14000000|(((-152)>>2)&0x3ffffff))
-        platform_patches.append(dict(name='skip macOS display-ID log suffix',offset=at,original_bytes='e00314aa'))
+        if profile.display_patch is not None:
+            platform_patches.append(
+                apply_instruction_patch(
+                    m, profile.display_patch, "skip macOS display-ID log suffix"
+                )
+            )
         if simulator_metal:
             # Simulator reports neither Mac1 nor Apple7. This opt-in diagnostic
             # lets the real renderer expose its actual missing capabilities.
             # It does NOT claim device support and must never enter a device build.
-            metal = next(s for s in m.symbols() if s['name']=='__ZN22GraphicsInterfaceMetal15createMTLDeviceEb')
-            at = metal['address']-base+44
-            assert struct.unpack_from('<I',data,at)[0]==0x910063e8
-            struct.pack_into('<I',data,at,0x14000000|((360-44)//4))
-            platform_patches.append(dict(name='SIMULATOR ONLY: probe Metal past GPU-family gate',offset=at,original_bytes='e8630091'))
-    extra += b'\0'
-    binding = oldbind[:bind_end(oldbind)] + extra
-    newoff = (len(data)+7)&~7
-    data += bytes(newoff-len(data)) + binding
-    struct.pack_into('<II',data,dyld+16,newoff,len(binding))
-    linkedit = next(p for p,name in segments if name==b'__LINKEDIT')
-    leoff = struct.unpack_from('<Q',data,linkedit+40)[0]
-    struct.pack_into('<Q',data,linkedit+48,len(data)-leoff)
-    struct.pack_into('<Q',data,linkedit+32,(len(data)-leoff+16383)&~16383)
-    main = next(p for c,p,n in m.commands if c==0x80000028)
-    original = struct.unpack_from('<Q',data,main+8)[0]
-    struct.pack_into('<Q',data,main+8,stub)
+            if profile.simulator_metal_patch is None:
+                raise ValueError(
+                    "No simulator Metal diagnostic patch was audited for this build"
+                )
+            platform_patches.append(
+                apply_instruction_patch(
+                    m,
+                    profile.simulator_metal_patch,
+                    "SIMULATOR ONLY: probe Metal past GPU-family gate",
+                )
+            )
+    extra += b"\0"
+    binding = oldbind[: bind_end(oldbind)] + extra
+    newoff = (len(data) + 7) & ~7
+    data += bytes(newoff - len(data)) + binding
+    struct.pack_into("<II", data, dyld + 16, newoff, len(binding))
+    linkedit = next(p for p, name in segments if name == b"__LINKEDIT")
+    leoff = struct.unpack_from("<Q", data, linkedit + 40)[0]
+    struct.pack_into("<Q", data, linkedit + 48, len(data) - leoff)
+    struct.pack_into("<Q", data, linkedit + 32, (len(data) - leoff + 16383) & ~16383)
+    main = next(p for c, p, n in m.commands if c == 0x80000028)
+    original = struct.unpack_from("<Q", data, main + 8)[0]
+    struct.pack_into("<Q", data, main + 8, stub)
     path.write_bytes(data)
-    return dict(original_entry_offset=original,entry_stub_offset=stub,pointer_slot_offset=slot,bind_stream_offset=newoff,sdl_redirects=changes,platform_patches=platform_patches)
+    return {
+        "source_sha256": profile.sha256,
+        "source_profile": profile.key,
+        "sdl_version": profile.sdl_version,
+        "zero_fill_growth": zero_fill_growth,
+        "original_entry_offset": original,
+        "entry_stub_offset": stub,
+        "pointer_slot_offset": slot,
+        "bind_stream_offset": newoff,
+        "sdl_redirects": changes,
+        "platform_patches": platform_patches,
+    }

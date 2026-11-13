@@ -1,14 +1,42 @@
 # Architecture and limitations
 
+## 2.1.24とSpace Ageへの対応
+
+2026年11月13日に、Steam版2.1.24 Space Age、build 87808を追加しました。
+`tools/source_profiles.py` で実行ファイルのSHA-256、必要なDLC、SDLのバージョンを
+組にして管理します。旧版2.0.77の通常版も保持しています。
+
+2.1.24ではSDL 3.4.14を使い、1,269箇所の公開APIをiOS用SDLへ転送します。
+SDL 3の起動は `SDL_RunApp` に接続し、入力アダプターもSDL 3の時刻、デバイスID、
+キーの状態、浮動小数点の座標に合わせています。旧版用SDL 2とビルド先を分けています。
+
+SDL 3ではポインターの格納領域が不足したため、最後のデータセグメントの
+ゼロ初期化領域を16 KiB広げました。ローダーの表を置く `__LINKEDIT` のマッピングも
+同じ量だけ後ろへ移します。元のセクションのアドレスとファイル上の位置は変えません。
+この変更はパッチの記録に残し、検証時に確認します。命令の転送先には12バイトの
+静的なコードを使います。実行時に命令を書き換えたりJITを使ったりする処理はありません。
+
+2.1.24のディスプレイ情報の記録はSDL 3の公開APIを使うため、旧版のmacOS固有の
+ディスプレイIDを読み飛ばすパッチは使いません。Steamworksの新しい初期化APIには、
+Steamクライアントを使えないことを表す失敗を返します。
+
+ゲームデータには、実行ファイルのハッシュを記録したファイルを付けます。
+別の実行ファイルへ切り替えた場合は、データ全体をコピーし終えてから入れ替えます。
+これにより、ビルド先に以前の版やDLCのデータが残ることを防ぎます。
+
+通常版としての処理とSpace Ageの処理は、Mac版とシミュレーターで120回の更新後の
+チェックサムが一致しました。Space Ageの検証用シナリオも両方で通っています。
+実機の描画、音声、操作は未検証です。以下の実機の記録は2.0.77のものです。
+
 ## How the original executable starts on the iPad
 
 The tools read the ARM64 slice of the macOS executable identified by the pinned
-SHA-256 hash. They create a new file under `build/`, change its Mach-O platform
+SHA-256 hashes in the source profiles. They create a new file under `build/`, change its Mach-O platform
 to iOS, and replace library paths with local facade libraries that refer to iOS
 libraries and the compatibility layer.
 
 Before signing, `tools/entrypoint.py` inserts static ARM64 trampolines into
-verified unused Mach-O space. In the tested build, 817 public SDL entry points
+verified unused Mach-O space. In the 2.0.77 baseline, 817 public SDL entry points
 are redirected to SDL 2.30.9, built separately for iOS. The new entry point runs
 through UIKit and reaches the preserved original `main`. There is no JIT and no
 runtime modification of executable memory pages.
@@ -43,7 +71,7 @@ M1 iPad, the compatibility layer implements the missing
 `isDepth24Stencil8PixelFormatSupported` method by returning `NO`, causing the
 original renderer to select its alternative depth format.
 
-Base-game assets are copied from the local installation into the app bundle.
+The selected edition's assets are copied from the local installation into the app bundle.
 Configuration and user data are stored under `Documents/Factorio` in the private
 app container. Its changing absolute paths are adjusted at startup. Simulation
 and rendering require no connection to the Mac.
@@ -66,7 +94,7 @@ guarantee. The original test logs and device screenshots are not included;
 Complex factories, many shader and texture paths, color fidelity, the full range
 of building actions involving multiple fingers, physical external keyboards and
 mice, and long-term behavior remain unverified. Bitmap compatibility reduces
-16-bit images to 8 bits. Steam features, controllers, and Space Age are not
+16-bit images to 8 bits. Steam features and controllers are not
 listed as supported. Multiplayer has not been tested. The iPad app still displays
 the original macOS executable's version label; that label does not establish
 the build target.
