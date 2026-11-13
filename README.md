@@ -31,6 +31,11 @@ Mac版とシミュレーターで120回の更新後のチェックサムが一�
 画面撮影の自動テストは初期化待ちで失敗したため、メニュー画面の確認は残っています。
 2.1.24での音声、タッチ操作、大規模な工場、長時間の動作は未検証です。
 
+同じiPadでは、設定の `render-in-native-resolution=true` を有効にして再起動し、
+`Native DPI: true`、描画先2752×2064、初期化の完了をログで確認しています。
+Windowの1600×1200は論理サイズで、描画先の画素数とは別の値です。
+設定の変更方法は[日本語の準備手順](docs/IPAD_SETUP.ja.md#ipadの実解像度で描画する)にあります。
+
 This repository builds a development-signed iPad app from your own macOS
 installation of Factorio. Game simulation, graphics, audio, and saves then run
 locally on the iPad. Playing requires no Mac or streaming connection; the Mac is

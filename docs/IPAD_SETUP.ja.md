@@ -46,6 +46,34 @@ iPad用アプリでは、29個の実行ファイルとライブラリ、1,269箇
 
 更新前の設定とユーザーデータは、Macの `reports/ipad-user-backup-before-memory-fix/` に保存しました。同じBundle Identifierで上書きし、アプリの削除は行っていません。ログ、バックアップ、署名済みアプリはGitの管理対象外です。
 
+## iPadの実解像度で描画する
+
+13インチM5 iPad Proでは、`Documents/Factorio/config.ini` の `[graphics]` にある設定を次のように変更しました。画質のmediumは維持しています。
+
+```ini
+render-in-native-resolution=true
+```
+
+設定の変更後にゲームを再起動し、ログで `Native DPI: true` と `Drawable: 2752x2064` を確認しました。起動から31.0秒で初期化が完了しています。アプリ本体の変更や再インストールは不要でした。
+
+ログの `Window: 1600x1200` は論理サイズです。描画先の画素数とは別の値なので、この値を2752×2064に書き換える処理は加えていません。実解像度での描画と画像素材の画質は別の設定です。mediumの画像素材も高精細にする場合は、別途画質を変更してメモリ使用量と動作を確認します。
+
+再設定するときは、ゲームを保存して終了してから、Macへ取り出した設定のコピーを編集し、同じ場所へ戻します。
+
+```sh
+xcrun devicectl device copy from --device 'LenのiPad' \
+  --domain-type appDataContainer --domain-identifier org.lenhirata.factorioipad \
+  --source Documents/Factorio/config.ini --destination reports/ipad-config-before.ini
+cp reports/ipad-config-before.ini reports/ipad-config-edited.ini
+# ipad-config-edited.iniの[graphics]にある設定を編集し、元のコピーは残します。
+xcrun devicectl device copy to --device 'LenのiPad' \
+  --domain-type appDataContainer --domain-identifier org.lenhirata.factorioipad \
+  --source reports/ipad-config-edited.ini --destination Documents/Factorio/config.ini
+xcrun devicectl device process launch --device 'LenのiPad' org.lenhirata.factorioipad
+```
+
+今回の変更前の設定とユーザーデータは `reports/ipad-backup-before-native-resolution/` に保存しています。この設定はiPadのアプリ内に保存され、通常の再起動でも維持されます。
+
 ## Steamから再取得する
 
 SteamでFactorioのプロパティを開き、ベータを「なし」にして、DLCのSpace Ageを有効にします。更新が完了してから、次を実行してください。
