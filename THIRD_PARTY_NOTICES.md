@@ -1,22 +1,11 @@
-# Abgrenzung der enthaltenen Dateien
+# 同梱するファイルとライセンスの範囲
 
-Die MIT-Lizenz dieses Repositorys gilt für den hier enthaltenen Portierungs-Code,
-die Build-Werkzeuge und die Dokumentation. Sie erteilt keine Rechte an Factorio,
-dessen ausführbaren Dateien, Grafiken, Audio, Spieldaten oder Marken.
+このリポジトリのMITライセンスは、移植用のコード、ビルドツール、文書に適用されます。Factorioの実行ファイル、画像、音声、ゲームデータ、商標に対する権利を付与するものではありません。
 
-Factorio und dessen Daten sind nicht Bestandteil dieses Repositorys. Der Build
-liest eine eigene lokale macOS-Installation und erzeugt daraus ausschließlich
-lokale Build-Produkte. Die darin enthaltenen Original-Lizenzdateien bleiben beim
-Kopieren der Spieldaten erhalten. Die erzeugten Apps und Spielarchive sind nicht
-Teil der zum Hochladen vorgesehenen Dateien.
+Factorio本体とゲームデータは、このリポジトリに含めません。ビルドには利用者が所有するmacOS版のインストールを使い、生成物はローカルの `build/` に置きます。データをコピーするときは、元のライセンスファイルも保持します。生成したアプリ、ゲームのアーカイブ、署名証明書、プロファイルはGitの管理対象外です。
 
-SDL 2.30.9 wird beim ersten Build aus dem offiziellen SDL-Repository geladen.
-SDL steht unter der zlib-Lizenz; die zugehörige LICENSE.txt bleibt im lokal
-entpackten Quellcode unter build/vendor/SDL-release-2.30.9 erhalten. Das Projekt
-ergänzt dessen CMake-Ziel um probe/SDLInputBridge.c.
+2.0.77にはSDL 2.30.9、2.1.24にはSDL 3.4.14を使います。どちらも[SDLの公式リポジトリ](https://github.com/libsdl-org/SDL)から取得し、`tools/prepare_sdl.py` で固定したSHA-256を確認します。SDLはzlibライセンスで配布されています。取得したソースに含まれる `LICENSE.txt` は、`build/vendor/SDL-release-<version>/` に保持します。ビルド時には、リポジトリ内の入力アダプターをSDLの共有ライブラリのターゲットへ追加します。
 
-Python/PyYAML, CMake und Apple SDKs werden lokal verwendet und nicht mit diesem
-Repository ausgeliefert. Ihre jeweiligen Lizenzbedingungen bleiben bestehen.
+Python、PyYAML、CMake、AppleのSDKはローカルで使用し、このリポジトリには同梱しません。それぞれのライセンス条件が適用されます。
 
-Dieses Projekt ist ein unabhängiger experimenteller Portierungsversuch und kein
-offizieller iPad-Client von Wube Software.
+これはWube Softwareの公式iPadクライアントではありません。実機での動作を検証していない構成については、準備手順に記載した確認範囲を参照してください。

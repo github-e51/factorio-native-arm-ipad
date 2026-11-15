@@ -1,5 +1,29 @@
 # Development and local checks
 
+## 2.1.24の処理を検証する
+
+最新版の検証は、起動済みのシミュレーターに対応するアプリを入れてから実行します。
+
+```sh
+uv run python tools/prepare_sdl.py --sdk iphonesimulator
+uv run python tools/build_probe.py --sdk iphonesimulator --uikit --bundle-data
+xcrun simctl install booted build/FactorioProbe.app
+uv run python tools/check_simulation.py --mode space-age --simulator booted
+uv run python tools/check_simulation.py --mode base --simulator booted
+```
+
+Mac版で作ったセーブをシミュレーターにコピーし、同じ構成で120回更新します。
+Space Ageでは `tests/scenarios/space-age/control.lua` を使い、5惑星、品質、
+宇宙プラットフォームも確認します。検証のために通常のセーブを開く処理はありません。
+結果は `reports/simulation-*.json`、実行の記録は同じ名前の `.log` に残ります。
+
+2.1.24でベンチマークのログを `tools/verify.py` に渡す場合は、同じ版とMOD構成の
+Mac版のログも `--reference-benchmark-log` で指定します。以下にある固定の
+チェックサム `2892897386` を使う手順は、2.0.77の通常版向けです。
+
+ビルド前の検査、署名、生成したアプリの場所は
+[日本語の準備手順](IPAD_SETUP.ja.md) を参照してください。
+
 First complete setup and a device build as described in the [README](../README.md).
 Run all commands here from the repository root.
 

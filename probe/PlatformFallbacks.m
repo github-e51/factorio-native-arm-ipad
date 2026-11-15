@@ -14,6 +14,14 @@ bool SteamAPI_Init(void) {
     return false;
 }
 
+// Steamworks InitEx returns an ESteamAPIInitResult, where 2 means that the
+// Steam client is unavailable. The engine already handles that failure path.
+int SteamInternal_SteamAPI_Init(const char *interfaceVersions, char *errorMessage) {
+    if (errorMessage) snprintf(errorMessage,1024,"Steam client unavailable on iPadOS");
+    fprintf(stderr,"FACTORIO_PROBE: Steam InitEx unavailable on iPadOS\n");
+    return 2;
+}
+
 // OpenCL extension cl_khr_icd: no OpenCL platforms are available on iPadOS.
 int32_t clGetPlatformIDs(uint32_t capacity, void **platforms, uint32_t *count) {
     if (count) *count = 0;

@@ -4,7 +4,7 @@ task_root="${SRCROOT}"
 task_python="$task_root/.venv/bin/python"
 task_sdk="${PLATFORM_NAME}"
 if [[ ! -x "$task_python" ]]; then
-    echo "Run python3 tools/setup.py from the repository folder first." >&2
+    echo "Run uv run python tools/setup.py --steam --preserve-source from the repository folder first." >&2
     exit 1
 fi
 "$task_python" "$task_root/tools/prepare_sdl.py" --sdk "$task_sdk"
