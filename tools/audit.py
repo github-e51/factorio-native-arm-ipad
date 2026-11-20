@@ -13,6 +13,10 @@ from macho import MachO
 
 from config import ROOT, DEFAULT_APP, validate_source
 
+# Xcode 27's device SDK describes system libraries with arm64e targets even
+# when linking an arm64 app. Keep Catalyst and macOS exports excluded.
+IOS_ARM64_TARGETS = {'arm64-ios', 'arm64e-ios', 'arm64e.x1-ios', 'arm64-ios-simulator'}
+
 class TBDLoader(yaml.SafeLoader):
     pass
 TBDLoader.add_constructor('!tapi-tbd', lambda loader, node: loader.construct_mapping(node, deep=True))
@@ -40,7 +44,7 @@ def sdk_exports(sdk, install_name, seen=None):
         for group in doc.get('exports', []) + doc.get('reexports', []):
             targets = group.get('targets', [])
             # Exclude macCatalyst and other platforms from SDK symbol availability.
-            if targets and not any(t in ('arm64-ios', 'arm64-ios-simulator') for t in targets):
+            if targets and not IOS_ARM64_TARGETS.intersection(targets):
                 continue
             result.update(group.get('symbols', []))
             result.update(group.get('weak-symbols', []))
@@ -52,7 +56,7 @@ def sdk_exports(sdk, install_name, seen=None):
             for name in group.get('objc-eh-types', []):
                 result.add('_OBJC_EHTYPE_$_'+name)
         for group in doc.get('reexported-libraries', []):
-            if not any(t in ('arm64-ios','arm64-ios-simulator') for t in group.get('targets', ['arm64-ios'])):
+            if not IOS_ARM64_TARGETS.intersection(group.get('targets', ['arm64-ios'])):
                 continue
             for library in group['libraries']:
                 result.update(sdk_exports(sdk, library, seen))

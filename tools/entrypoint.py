@@ -33,7 +33,7 @@ def bind_end(stream):
             raise ValueError(f'Unsupported bind opcode {op:x}')
     raise ValueError('No BIND_DONE')
 
-def inject_entry(path, sdl_path=None, simulator_metal=False):
+def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
     m = MachO(path)
     data = m.data
     assert all(c != 0x1d for c,p,n in m.commands), 'Inject before codesign'
@@ -52,6 +52,9 @@ def inject_entry(path, sdl_path=None, simulator_metal=False):
                 section = m.sections[s['section']-1]
                 if section['name']=='__text':
                     redirects.append(s)
+        expected = 817 if sdl_major == 2 else 1269
+        if len(redirects) != expected:
+            raise ValueError(f'SDL{sdl_major} redirect set changed: expected {expected}, got {len(redirects)}')
     stub = (first-16*(1+len(redirects))) & ~15
     assert stub >= 32+struct.unpack_from('<I',data,20)[0]
     assert data[stub:stub+16*(1+len(redirects))] == bytes(16*(1+len(redirects)))
@@ -98,7 +101,7 @@ def inject_entry(path, sdl_path=None, simulator_metal=False):
         struct.pack_into('<I',data,offset,0x14000000|((displacement>>2)&0x3ffffff))
         changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
     platform_patches = []
-    if sdl_path:
+    if sdl_path and sdl_major == 2:
         # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
         # to append a CGDirectDisplayID to a log message. UIKit has different
         # driverdata. Preserve the display name, bounds, pixel format and Hz log.
