@@ -59,6 +59,26 @@ static void FPRequestPointerLock(UIViewController *controller,BOOL lock) {
 
 }
 
+// With a mouse or trackpad moving the cursor by GCMouse deltas (iPad, pointer locked), iOS still
+// reports each click and drag as an indirect-pointer touch at the locked position, always around the
+// screen centre. SDL turns such a touch into an absolute pointer move, so every click snapped the
+// cursor there. SDL already gets the buttons and the movement from GCMouse; skip its absolute move
+// while that is the case (iPhone with AssistiveTouch has no deltas and keeps SDL's own handling).
+static BOOL FPDeltaPointerActive;
+static void FPIgnoreAbsolutePointerMoves(void) {
+    static BOOL done;
+    Class view=NSClassFromString(@"SDL_uikitview");
+    SEL selector=NSSelectorFromString(@"indirectPointerMoving:");
+    Method method=view ? class_getInstanceMethod(view,selector) : NULL;
+    if (done || !method) return;
+    done=YES;
+    IMP original=method_getImplementation(method);
+    class_replaceMethod(view,selector,imp_implementationWithBlock(^(id self,UITouch *touch) {
+        if (FPDeltaPointerActive) return;
+        ((void(*)(id,SEL,id))original)(self,selector,touch);
+    }),method_getTypeEncoding(method));
+}
+
 static BOOL FPLeftButtonArrives;
 
 @interface FPInputButton : UIButton
@@ -441,6 +461,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     if (!self.window) return;
+    FPIgnoreAbsolutePointerMoves();
     UIHoverGestureRecognizer *hover=[[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(pointerHovered)];
     hover.cancelsTouchesInView=NO;
     [self.window addGestureRecognizer:hover];
@@ -466,6 +487,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     // movement really arrives, rather than leaving a dead arrow in the corner.
     if (!mice.count) self.mouseMoves=self.systemPointer=NO;
     self.pointerSurface.hardwareCursor=mice.count>0 && self.mouseMoves && !self.systemPointer;
+    FPDeltaPointerActive=self.pointerSurface.hardwareCursor;
     if (self.window) FPRequestPointerLock(self.window.rootViewController,mice.count>0);
     [self applyVisibility]; [self.pointerSurface refreshCursor]; [self.pointerSurface setNeedsDisplay];
     // Hardware players rarely want the touch controls; keep them one tap away on the eye.
